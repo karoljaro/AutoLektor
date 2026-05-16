@@ -9,11 +9,23 @@ from helpers.file_helpers import file_exists, read_text_from_file
 from helpers.time_helpers import format_time
 
 
-def test_read_text_from_file_cleans_whitespace(tmp_path: Path) -> None:
+def test_read_text_from_file_normalizes_all_whitespace(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr("helpers.file_helpers.NORMALIZE_WHITESPACE", True)
     file_path = tmp_path / "input.txt"
     file_path.write_text("  Hello\n\n world\tfrom   pytest  ", encoding="utf-8")
 
     assert read_text_from_file(str(file_path)) == "Hello world from pytest"
+
+
+def test_read_text_from_file_preserves_newlines(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr("helpers.file_helpers.NORMALIZE_WHITESPACE", False)
+    file_path = tmp_path / "input.txt"
+    file_path.write_text("  Hello\n\n world\tfrom   pytest  ", encoding="utf-8")
+
+    result = read_text_from_file(str(file_path))
+    assert "Hello" in result
+    assert "world" in result
+    assert "\n" in result
 
 
 def test_read_text_from_file_missing_returns_none(tmp_path: Path) -> None:

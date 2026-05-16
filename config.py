@@ -19,10 +19,15 @@ VIDEO_DUBBED_ONLY = "2_wideo_tylko_lektor.mp4"
 VIDEO_SUBTITLES_ONLY = "3_wideo_tylko_napisy.mp4"
 
 # Whisper model size
-WHISPER_MODEL = "base"
+WHISPER_MODEL = "large-v3"
 
 # Transcription language
 TRANSCRIPTION_LANGUAGE = "pl"
+
+# Text cleaning options
+# If True, collapses all whitespace (newlines, tabs) into single spaces
+# If False, preserves newlines as natural pauses for TTS
+NORMALIZE_WHITESPACE = False
 
 # Video FPS
 VIDEO_FPS = 30

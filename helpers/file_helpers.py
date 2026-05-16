@@ -2,6 +2,7 @@
 
 import os
 from logger import get_logger
+from config import NORMALIZE_WHITESPACE
 
 logger = get_logger(__name__)
 
@@ -23,10 +24,19 @@ def read_text_from_file(file_name: str) -> str | None:
     with open(file_name, "r", encoding="utf-8") as file_handle:
         text = file_handle.read()
 
-    # Normalize whitespace to avoid accidental pauses in TTS.
-    text = " ".join(text.split())
+    # Clean whitespace based on configuration
+    if NORMALIZE_WHITESPACE:
+        # Collapse all whitespace: newlines, tabs, multiple spaces
+        text = " ".join(text.split())
+        logger.info("-> Normalizing all whitespace (mode: aggressive)")
+    else:
+        # Preserve newlines as natural pauses, but collapse internal spaces
+        lines = text.split("\n")
+        cleaned_lines = [" ".join(line.split()) for line in lines]
+        text = "\n".join(cleaned_lines)
+        logger.info("-> Preserving newlines for natural pauses (mode: conservative)")
 
-    if not text:
+    if not text or not text.replace("\n", "").strip():
         logger.error(f"-> [ERROR] File {file_name} is empty!")
         return None
 
