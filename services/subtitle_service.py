@@ -4,6 +4,9 @@ Subtitle Service - orchestrates subtitle generation.
 
 from helpers.time_helpers import format_time
 from providers.protocols import WhisperProtocol
+from logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class SubtitleService:
@@ -27,13 +30,13 @@ class SubtitleService:
             output_srt_path: Where to save the SRT file
             language: Language for transcription (default: "pl")
         """
-        print("\n[STEP 2/3] Generating SRT subtitles from the voice track...")
+        logger.info("\n[STEP 2/3] Generating SRT subtitles from the voice track...")
 
         # Transcribe audio
         result = self.whisper_provider.transcribe(audio_path, language=language)
         segments = result.get("segments", [])
 
-        print("-> Saving the SRT file...")
+        logger.info("-> Saving the SRT file...")
 
         # Write SRT file
         with open(output_srt_path, "w", encoding="utf-8") as srt_file:
@@ -44,4 +47,4 @@ class SubtitleService:
 
                 srt_file.write(f"{i}\n{start} --> {end}\n{text}\n\n")
 
-        print(f"-> Saved: {output_srt_path}")
+        logger.info("-> Saved: %s", output_srt_path)

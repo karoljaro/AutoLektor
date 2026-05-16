@@ -4,6 +4,9 @@ Video Service - orchestrates video merging and rendering.
 
 from helpers import file_exists
 from providers.ffmpeg_provider import FFmpegProvider
+from logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class VideoService:
@@ -29,34 +32,34 @@ class VideoService:
             subtitles_file: Path to SRT subtitles
             output_paths: Dict with keys "full", "dubbed", "subtitles_only"
         """
-        print("\n[STEP 3/3] Rendering three video variants (FFmpeg)...")
+        logger.info("\n[STEP 3/3] Rendering three video variants (FFmpeg)...")
 
         if not file_exists(source_video):
-            print(f"-> [ERROR] Video not found: {source_video}")
+            logger.error("-> [ERROR] Video not found: %s", source_video)
             return False
 
         try:
             # Variant 1: Voiceover + Subtitles
-            print("-> Rendering Variant 1: Voiceover + Subtitles (this will take the longest)...")
+            logger.info("-> Rendering Variant 1: Voiceover + Subtitles (this will take the longest)...")
             self.ffmpeg.merge_videos(source_video, dubbed_audio, subtitles_file,
                                      output_paths["full"], variant="full")
-            print(f"   [DONE] {output_paths['full']}")
+            logger.info("   [DONE] %s", output_paths['full'])
 
             # Variant 2: Voiceover only
-            print("-> Rendering Variant 2: Voiceover only (very fast!)...")
+            logger.info("-> Rendering Variant 2: Voiceover only (very fast!)...")
             self.ffmpeg.merge_videos(source_video, dubbed_audio, subtitles_file,
                                      output_paths["dubbed"], variant="dubbed")
-            print(f"   [DONE] {output_paths['dubbed']}")
+            logger.info("   [DONE] %s", output_paths['dubbed'])
 
             # Variant 3: Subtitles only
-            print("-> Rendering Variant 3: Subtitles only with the original audio...")
+            logger.info("-> Rendering Variant 3: Subtitles only with the original audio...")
             self.ffmpeg.merge_videos(source_video, dubbed_audio, subtitles_file,
                                      output_paths["subtitles_only"], variant="subtitles_only")
-            print(f"   [DONE] {output_paths['subtitles_only']}")
+            logger.info("   [DONE] %s", output_paths['subtitles_only'])
 
-            print("\n[SUCCESS] All 3 video variants have been generated!")
+            logger.info("\n[SUCCESS] All 3 video variants have been generated!")
             return True
 
         except (RuntimeError, ValueError, KeyError) as e:
-            print(f"\n[FFmpeg ERROR] Something went wrong while merging the files: {e}")
+            logger.error("\n[FFmpeg ERROR] Something went wrong while merging the files: %s", e)
             return False

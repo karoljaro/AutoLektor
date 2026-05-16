@@ -13,6 +13,7 @@ from providers.whisper_provider import WhisperProvider
 from services.subtitle_service import SubtitleService
 from services.video_service import VideoService
 from services.voiceover_service import VoiceoverService
+from logger import get_logger
 
 # Suppress non-essential warnings
 warnings.filterwarnings("ignore")
@@ -27,6 +28,7 @@ class PipelineServices:
     video: VideoService
 
 
+logger = get_logger(__name__)
 # ==========================================
 # INITIALIZATION
 # ==========================================
@@ -55,7 +57,7 @@ def initialize_services() -> PipelineServices:
 
 async def main():
     """Main orchestration function."""
-    print("=== VIDEO AUTOMATION START ===")
+    logger.info("=== VIDEO AUTOMATION START ===")
 
     # Initialize services
     services = initialize_services()
@@ -64,7 +66,7 @@ async def main():
     loaded_text = read_text_from_file(TEXT_FILE)
 
     if not loaded_text:
-        print("=== PROCESS STOPPED ===")
+        logger.error("=== PROCESS STOPPED ===")
         return
 
     # Step 1: Generate and adjust voiceover
@@ -95,7 +97,7 @@ async def main():
         output_paths=output_paths
     )
 
-    print("=== END ===")
+    logger.info("=== END ===")
 
 
 # Run the script

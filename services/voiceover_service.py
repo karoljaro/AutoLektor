@@ -5,6 +5,9 @@ import math
 from helpers.duration_helpers import get_duration
 from helpers.file_helpers import file_exists
 from providers.protocols import TTSProtocol
+from logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class VoiceoverService:
@@ -31,7 +34,7 @@ class VoiceoverService:
             source_video_path: Path to source video (to match duration)
             output_audio_path: Where to save the audio file
         """
-        print("\n[STEP 1/3] Generating the base voiceover...")
+        logger.info("\n[STEP 1/3] Generating the base voiceover...")
 
         if not file_exists(source_video_path):
             raise FileNotFoundError(f"Source video not found: {source_video_path}")
@@ -46,18 +49,18 @@ class VoiceoverService:
         if video_duration <= 0:
             raise ValueError(f"Source video duration must be > 0, got {video_duration}")
 
-        print(f"-> Video duration: {video_duration:.2f} s")
-        print(f"-> Audio duration: {audio_duration:.2f} s")
+        logger.info("-> Video duration: %.2f s", video_duration)
+        logger.info("-> Audio duration: %.2f s", audio_duration)
 
         # Adjust speed if needed
         if audio_duration > video_duration:
             ratio = audio_duration / video_duration
             percent = math.ceil((ratio - 1) * 100)
 
-            print(f"-> [ACTION] Audio is too long! Speeding up the voiceover automatically by +{percent}%...")
+            logger.warning("-> [ACTION] Audio is too long! Speeding up the voiceover automatically by +%d%%...", percent)
 
             new_rate = f"+{percent}%"
             await self.tts_provider.generate_voiceover(text, output_audio_path, rate=new_rate)
-            print(f"-> Saved adjusted, sped-up version: {output_audio_path}")
+            logger.info("-> Saved adjusted, sped-up version: %s", output_audio_path)
         else:
-            print("-> Audio fits within the video duration. Speed unchanged.")
+            logger.info("-> Audio fits within the video duration. Speed unchanged.")
