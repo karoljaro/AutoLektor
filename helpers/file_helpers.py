@@ -3,7 +3,7 @@
 import os
 
 
-def read_text_from_file(file_name):
+def read_text_from_file(file_name: str) -> str | None:
     """Load and clean text from a file.
 
     Args:
@@ -31,7 +31,6 @@ def read_text_from_file(file_name):
     return text
 
 
-def file_exists(file_path):
+def file_exists(file_path: str) -> bool:
     """Check if a file exists."""
     return os.path.exists(file_path)
-

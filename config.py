@@ -10,6 +10,7 @@ VOICE = "pl-PL-ZofiaNeural"
 
 # Working and output file names
 POLISH_AUDIO_FILE = "Video/lektor_pl.mp3"
+SUBTITLE_FILE = "Video/lektor_pl.srt"
 SOURCE_VIDEO = "Video/wideo_angielskie.mp4"
 
 # Output video names
@@ -29,4 +30,3 @@ VIDEO_FPS = 30
 # Video encoding settings
 VIDEO_CODEC = "libx264"
 AUDIO_CODEC = "aac"
-

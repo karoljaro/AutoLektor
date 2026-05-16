@@ -3,12 +3,13 @@
 import math
 
 from helpers.duration_helpers import get_duration
+from helpers.file_helpers import file_exists
 
 
 class VoiceoverService:
     """Service for generating and adjusting voiceovers."""
 
-    def __init__(self, tts_provider):
+    def __init__(self, tts_provider) -> None:
         """Initialize Voiceover service.
 
         Args:
@@ -16,7 +17,12 @@ class VoiceoverService:
         """
         self.tts_provider = tts_provider
 
-    async def create_and_adjust_voiceover(self, text, source_video_path, output_audio_path):
+    async def create_and_adjust_voiceover(
+            self,
+            text: str,
+            source_video_path: str,
+            output_audio_path: str,
+    ) -> None:
         """Generate voiceover and automatically adjust speed if needed.
 
         Args:
@@ -26,12 +32,18 @@ class VoiceoverService:
         """
         print("\n[STEP 1/3] Generating the base voiceover...")
 
+        if not file_exists(source_video_path):
+            raise FileNotFoundError(f"Source video not found: {source_video_path}")
+
         # Generate initial voiceover
         await self.tts_provider.generate_voiceover(text, output_audio_path)
 
         # Check durations
         video_duration = get_duration(source_video_path)
         audio_duration = get_duration(output_audio_path)
+
+        if video_duration <= 0:
+            raise ValueError(f"Source video duration must be > 0, got {video_duration}")
 
         print(f"-> Video duration: {video_duration:.2f} s")
         print(f"-> Audio duration: {audio_duration:.2f} s")
@@ -48,4 +60,3 @@ class VoiceoverService:
             print(f"-> Saved adjusted, sped-up version: {output_audio_path}")
         else:
             print("-> Audio fits within the video duration. Speed unchanged.")
-

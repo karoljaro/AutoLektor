@@ -5,7 +5,7 @@ Helper functions for getting file duration using ffprobe.
 import subprocess
 
 
-def get_duration(file_path):
+def get_duration(file_path: str) -> float:
     """
     Use system ffprobe to measure file duration in seconds.
 
@@ -22,6 +22,10 @@ def get_duration(file_path):
         "-of", "default=noprint_wrappers=1:nokey=1",
         file_path
     ]
-    result = subprocess.run(command, stdout=subprocess.PIPE, text=True, check=True)
-    return float(result.stdout.strip())
+    try:
+        result = subprocess.run(command, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        details = (exc.stderr or exc.stdout or "unknown ffprobe error").strip()
+        raise RuntimeError(f"Could not read duration for '{file_path}': {details}") from exc
 
+    return float(result.stdout.strip())

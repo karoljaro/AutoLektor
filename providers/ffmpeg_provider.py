@@ -1,15 +1,31 @@
-"""
-FFmpeg Provider - wraps FFmpeg command-line tools.
-"""
+"""FFmpeg Provider - wraps FFmpeg command-line tools."""
 
 import subprocess
+from collections.abc import Sequence
+
+from config import AUDIO_CODEC, VIDEO_CODEC, VIDEO_FPS
 
 
 class FFmpegProvider:
     """Provider for video operations using FFmpeg."""
 
     @staticmethod
-    def merge_videos(source_video, dubbed_audio, subtitles_file, output_path, variant="full"):
+    def _run_ffmpeg(command: Sequence[str]) -> None:
+        """Run FFmpeg command and re-raise readable errors."""
+        try:
+            subprocess.run(command, check=True, capture_output=True, text=True)
+        except subprocess.CalledProcessError as exc:
+            details = (exc.stderr or exc.stdout or "unknown ffmpeg error").strip()
+            raise RuntimeError(f"FFmpeg command failed: {details}") from exc
+
+    @staticmethod
+    def merge_videos(
+            source_video: str,
+            dubbed_audio: str,
+            subtitles_file: str,
+            output_path: str,
+            variant: str = "full",
+    ) -> None:
         """
         Merge video, audio, and optionally subtitles using FFmpeg.
 
@@ -28,9 +44,9 @@ class FFmpegProvider:
                     "-i", dubbed_audio,
                     "-map", "0:v:0",
                     "-map", "1:a:0",
-                    "-vf", f"fps=30,subtitles={subtitles_file}",
-                    "-c:v", "libx264",
-                    "-c:a", "aac",
+                    "-vf", f"fps={VIDEO_FPS},subtitles={subtitles_file}",
+                    "-c:v", VIDEO_CODEC,
+                    "-c:a", AUDIO_CODEC,
                     output_path
                 ]
             case "dubbed":
@@ -41,7 +57,7 @@ class FFmpegProvider:
                     "-map", "0:v:0",
                     "-map", "1:a:0",
                     "-c:v", "copy",
-                    "-c:a", "aac",
+                    "-c:a", AUDIO_CODEC,
                     output_path
                 ]
             case "subtitles_only":
@@ -50,13 +66,12 @@ class FFmpegProvider:
                     "-i", source_video,
                     "-map", "0:v:0",
                     "-map", "0:a:0",
-                    "-vf", f"fps=30,subtitles={subtitles_file}",
-                    "-c:v", "libx264",
+                    "-vf", f"fps={VIDEO_FPS},subtitles={subtitles_file}",
+                    "-c:v", VIDEO_CODEC,
                     "-c:a", "copy",
                     output_path
                 ]
             case _:
                 raise ValueError(f"Unknown variant: {variant}")
 
-        subprocess.run(command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
+        FFmpegProvider._run_ffmpeg(command)

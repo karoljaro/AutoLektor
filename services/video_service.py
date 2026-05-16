@@ -2,18 +2,24 @@
 Video Service - orchestrates video merging and rendering.
 """
 
-from providers.ffmpeg_provider import FFmpegProvider
 from helpers import file_exists
+from providers.ffmpeg_provider import FFmpegProvider
 
 
 class VideoService:
     """Service for video operations (merging, rendering)."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize Video Service."""
         self.ffmpeg = FFmpegProvider()
 
-    def create_all_variants(self, source_video, dubbed_audio, subtitles_file, output_paths):
+    def create_all_variants(
+            self,
+            source_video: str,
+            dubbed_audio: str,
+            subtitles_file: str,
+            output_paths: dict[str, str],
+    ) -> bool:
         """
         Create all three video variants.
 
@@ -51,7 +57,6 @@ class VideoService:
             print("\n[SUCCESS] All 3 video variants have been generated!")
             return True
 
-        except Exception as e:
+        except (RuntimeError, ValueError, KeyError) as e:
             print(f"\n[FFmpeg ERROR] Something went wrong while merging the files: {e}")
             return False
-

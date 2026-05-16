@@ -2,13 +2,15 @@
 Whisper Provider - wraps OpenAI Whisper library.
 """
 
+from typing import Any
+
 import whisper
 
 
 class WhisperProvider:
     """Provider for speech-to-text using Whisper."""
 
-    def __init__(self, model_name="base"):
+    def __init__(self, model_name: str = "base") -> None:
         """
         Initialize Whisper Provider.
 
@@ -24,7 +26,7 @@ class WhisperProvider:
             self.model = whisper.load_model(self.model_name)
         return self.model
 
-    def transcribe(self, audio_path, language="pl"):
+    def transcribe(self, audio_path: str, language: str = "pl") -> dict[str, Any]:
         """
         Transcribe audio to text with timestamps.
 
@@ -36,6 +38,5 @@ class WhisperProvider:
             Whisper result dict with segments
         """
         model = self.load_model()
-        result = model.transcribe(audio_path, language=language)
+        result = whisper.transcribe(model, audio=audio_path, language=language)
         return result
-
