@@ -23,7 +23,10 @@ GLOS = "pl-PL-ZofiaNeural"  # lub "pl-PL-ZofiaNeural"
 # Nazwy plików roboczych i końcowych
 PLIK_AUDIO_PL = "lektor_pl.mp3"
 WIDEO_ANGIELSKIE = "wideo_angielskie.mp4"  # Pamiętaj o zmianie na swoją nazwę!
-WIDEO_KONCOWE = "gotowe_wideo_pl.mp4"
+
+WIDEO_LEKTOR_NAPISY = "1_wideo_lektor_napisy.mp4"
+WIDEO_TYLKO_LEKTOR = "2_wideo_tylko_lektor.mp4"
+WIDEO_TYLKO_NAPISY = "3_wideo_tylko_napisy.mp4"
 
 
 # ==========================================
@@ -122,29 +125,65 @@ def stworz_napisy():
 
 
 def scalaj_wideo():
-    print("\n[KROK 3/3] Podmienianie dźwięku i wtapianie napisów (FFmpeg)...")
+    print("\n[KROK 3/3] Renderowanie trzech wariantów wideo (FFmpeg)...")
     plik_srt = "lektor_pl.srt"
 
     if not os.path.exists(WIDEO_ANGIELSKIE):
         print(f"-> [BŁĄD] Nie znaleziono wideo: {WIDEO_ANGIELSKIE}")
         return
 
-    komenda = [
-        "ffmpeg",
-        "-y",
+    # WARIANT 1: Lektor + Napisy (nasz dotychczasowy)
+    print("-> Renderowanie Wariantu 1: Lektor + Napisy (to potrwa najdłużej)...")
+    komenda_pelna = [
+        "ffmpeg", "-y",
         "-i", WIDEO_ANGIELSKIE,
         "-i", PLIK_AUDIO_PL,
-        "-map", "0:v:0",
-        "-map", "1:a:0",
-        "-vf", f"fps=30,subtitles={plik_srt}",
+        "-map", "0:v:0",  # Obraz z oryginału
+        "-map", "1:a:0",  # Dźwięk z polskiego lektora
+        "-vf", f"fps=30,subtitles={plik_srt}",  # Usztywnienie fps i napisy
         "-c:v", "libx264",
         "-c:a", "aac",
-        WIDEO_KONCOWE
+        WIDEO_LEKTOR_NAPISY
     ]
 
+    # WARIANT 2: Tylko Lektor, bez napisów
+    print("-> Renderowanie Wariantu 2: Tylko Lektor (błyskawiczne!)...")
+    komenda_tylko_lektor = [
+        "ffmpeg", "-y",
+        "-i", WIDEO_ANGIELSKIE,
+        "-i", PLIK_AUDIO_PL,
+        "-map", "0:v:0",  # Obraz z oryginału
+        "-map", "1:a:0",  # Dźwięk z polskiego lektora
+        "-c:v", "copy",  # KOPIUJEMY obraz 1:1, bez renderowania!
+        "-c:a", "aac",
+        WIDEO_TYLKO_LEKTOR
+    ]
+
+    # WARIANT 3: Tylko Napisy (oryginalny angielski dźwięk + polskie napisy)
+    print("-> Renderowanie Wariantu 3: Tylko Napisy z oryginalnym audio...")
+    komenda_tylko_napisy = [
+        "ffmpeg", "-y",
+        "-i", WIDEO_ANGIELSKIE,
+        "-map", "0:v:0",  # Obraz z oryginału
+        "-map", "0:a:0",  # Dźwięk z ORYGINAŁU (angielski)
+        "-vf", f"fps=30,subtitles={plik_srt}",  # Napisy
+        "-c:v", "libx264",
+        "-c:a", "copy",  # Kopiujemy oryginalne audio bez utraty jakości
+        WIDEO_TYLKO_NAPISY
+    ]
+
+    # Odpalenie wszystkich trzech komend po kolei
     try:
-        subprocess.run(komenda, check=True)
-        print(f"\n[SUKCES] Cały proces zakończony! Twój nowy film to: {WIDEO_KONCOWE}")
+        subprocess.run(komenda_pelna, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        print(f"   [GOTOWE] {WIDEO_LEKTOR_NAPISY}")
+
+        subprocess.run(komenda_tylko_lektor, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        print(f"   [GOTOWE] {WIDEO_TYLKO_LEKTOR}")
+
+        subprocess.run(komenda_tylko_napisy, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        print(f"   [GOTOWE] {WIDEO_TYLKO_NAPISY}")
+
+        print("\n[SUKCES] Wszystkie 3 warianty wideo zostały wygenerowane!")
     except subprocess.CalledProcessError as e:
         print(f"\n[BŁĄD FFmpeg] Coś poszło nie tak podczas łączenia plików: {e}")
 
