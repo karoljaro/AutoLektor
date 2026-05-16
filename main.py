@@ -7,210 +7,210 @@ import warnings
 import edge_tts
 import whisper
 
-# Wyłączamy nieistotne ostrzeżenia
+# Suppress non-essential warnings
 warnings.filterwarnings("ignore")
 
 # ==========================================
-# 1. KONFIGURACJA ZMIENNYCH
+# 1. VARIABLE CONFIGURATION
 # ==========================================
 
 
-# Zmieniamy tekst na nazwę pliku, z którego skrypt ma czytać
-PLIK_Z_TEKSTEM = "tekst.txt"
+# Text input file used by the script
+TEXT_FILE = "tekst.txt"
 
-GLOS = "pl-PL-ZofiaNeural"  # lub "pl-PL-ZofiaNeural"
+VOICE = "pl-PL-ZofiaNeural"  # or "pl-PL-ZofiaNeural"
 
-# Nazwy plików roboczych i końcowych
-PLIK_AUDIO_PL = "lektor_pl.mp3"
-WIDEO_ANGIELSKIE = "wideo_angielskie.mp4"  # Pamiętaj o zmianie na swoją nazwę!
+# Working and output file names
+POLISH_AUDIO_FILE = "lektor_pl.mp3"
+SOURCE_VIDEO = "wideo_angielskie.mp4"  # Remember to rename it to your own file!
 
-WIDEO_LEKTOR_NAPISY = "1_wideo_lektor_napisy.mp4"
-WIDEO_TYLKO_LEKTOR = "2_wideo_tylko_lektor.mp4"
-WIDEO_TYLKO_NAPISY = "3_wideo_tylko_napisy.mp4"
+VIDEO_DUBBED_WITH_SUBTITLES = "1_wideo_lektor_napisy.mp4"
+VIDEO_DUBBED_ONLY = "2_wideo_tylko_lektor.mp4"
+VIDEO_SUBTITLES_ONLY = "3_wideo_tylko_napisy.mp4"
 
 
 # ==========================================
-# 2. FUNKCJE POMOCNICZE
+# 2. HELPER FUNCTIONS
 # ==========================================
 
-def pobierz_czas_trwania(plik):
-    """Używa systemowego ffprobe do zmierzenia długości pliku w sekundach"""
-    komenda = [
+def get_duration(file_path):
+    """Use system ffprobe to measure file duration in seconds."""
+    command = [
         "ffprobe",
         "-v", "error",
         "-show_entries", "format=duration",
         "-of", "default=noprint_wrappers=1:nokey=1",
-        plik
+        file_path
     ]
-    wynik = subprocess.run(komenda, stdout=subprocess.PIPE, text=True, check=True)
-    return float(wynik.stdout.strip())
+    result = subprocess.run(command, stdout=subprocess.PIPE, text=True, check=True)
+    return float(result.stdout.strip())
 
 
-def wczytaj_tekst_z_pliku(nazwa_pliku):
-    print(f"\n[KROK 0/3] Wczytywanie tekstu z pliku {nazwa_pliku}...")
-    if not os.path.exists(nazwa_pliku):
-        print(f"-> [BŁĄD] Nie znaleziono pliku {nazwa_pliku}!")
+def read_text_from_file(file_name):
+    print(f"\n[STEP 0/3] Loading text from file {file_name}...")
+    if not os.path.exists(file_name):
+        print(f"-> [ERROR] File not found: {file_name}!")
         return None
 
-    with open(nazwa_pliku, "r", encoding="utf-8") as plik:
-        tekst = plik.read()
+    with open(file_name, "r", encoding="utf-8") as file_handle:
+        text = file_handle.read()
 
-    # MAGICZNY WALEC: Usuwa wszelkie niepotrzebne taby, wielokrotne spacje i entery
-    tekst = " ".join(tekst.split())
+    # Magic roller: remove unnecessary tabs, repeated spaces, and line breaks
+    text = " ".join(text.split())
 
-    if not tekst:
-        print(f"-> [BŁĄD] Plik {nazwa_pliku} jest pusty!")
+    if not text:
+        print(f"-> [ERROR] File {file_name} is empty!")
         return None
 
-    print("-> Tekst wczytany i wyczyszczony z białych znaków.")
-    return tekst
+    print("-> Text loaded and cleaned up from whitespace.")
+    return text
 
 
-async def stworz_lektora(tekst):
-    print(f"\n[KROK 1/3] Generowanie bazowego głosu lektora ({GLOS})...")
-    # Generujemy głos w normalnym tempie (wersja próbna)
-    communicate = edge_tts.Communicate(tekst, GLOS)
-    await communicate.save(PLIK_AUDIO_PL)
+async def create_voiceover(text):
+    print(f"\n[STEP 1/3] Generating the base voiceover ({VOICE})...")
+    # Generate the voice at normal speed (trial version)
+    communicate = edge_tts.Communicate(text, VOICE)
+    await communicate.save(POLISH_AUDIO_FILE)
 
-    # Mierzymy długość wideo i wygenerowanego audio
-    czas_wideo = pobierz_czas_trwania(WIDEO_ANGIELSKIE)
-    czas_audio = pobierz_czas_trwania(PLIK_AUDIO_PL)
+    # Measure the duration of the video and generated audio
+    video_duration = get_duration(SOURCE_VIDEO)
+    audio_duration = get_duration(POLISH_AUDIO_FILE)
 
-    print(f"-> Czas wideo: {czas_wideo:.2f} s")
-    print(f"-> Czas audio: {czas_audio:.2f} s")
+    print(f"-> Video duration: {video_duration:.2f} s")
+    print(f"-> Audio duration: {audio_duration:.2f} s")
 
-    # Jeśli lektor "wystaje" poza wideo, obliczamy i naprawiamy
-    if czas_audio > czas_wideo:
-        wspolczynnik = czas_audio / czas_wideo
-        # math.ceil zaokrągla w górę, np. 12.1% -> 13% (daje margines bezpieczeństwa)
-        procent = math.ceil((wspolczynnik - 1) * 100)
+    # If the voiceover runs longer than the video, calculate and fix it
+    if audio_duration > video_duration:
+        ratio = audio_duration / video_duration
+        # math.ceil rounds up, e.g. 12.1% -> 13% (gives a safety margin)
+        percent = math.ceil((ratio - 1) * 100)
 
-        print(f"-> [AKCJA] Audio za długie! Przyspieszam lektora automatycznie o +{procent}%...")
+        print(f"-> [ACTION] Audio is too long! Speeding up the voiceover automatically by +{percent}%...")
 
-        nowy_rate = f"+{procent}%"
-        communicate_szybki = edge_tts.Communicate(tekst, GLOS, rate=nowy_rate)
-        await communicate_szybki.save(PLIK_AUDIO_PL)  # Nadpisujemy stary plik nowym
-        print(f"-> Zapisano dopasowaną, przyspieszoną wersję: {PLIK_AUDIO_PL}")
+        new_rate = f"+{percent}%"
+        fast_communicate = edge_tts.Communicate(text, VOICE, rate=new_rate)
+        await fast_communicate.save(POLISH_AUDIO_FILE)  # Overwrite the old file with the new one
+        print(f"-> Saved adjusted, sped-up version: {POLISH_AUDIO_FILE}")
     else:
-        print("-> Audio mieści się w czasie wideo. Nie zmieniam tempa.")
+        print("-> Audio fits within the video duration. Speed unchanged.")
 
 
-def stworz_napisy():
-    print("\n[KROK 2/3] Generowanie napisów SRT na podstawie głosu...")
+def create_subtitles():
+    print("\n[STEP 2/3] Generating SRT subtitles from the voice track...")
     model = whisper.load_model("base")
-    wynik = model.transcribe(PLIK_AUDIO_PL, language="pl")
+    result = model.transcribe(POLISH_AUDIO_FILE, language="pl")
 
-    # Nasza własna, niezawodna funkcja do formatowania czasu dla napisów
-    def format_czasu(sekundy):
-        godziny = int(sekundy // 3600)
-        minuty = int((sekundy % 3600) // 60)
-        sek = sekundy % 60
-        # Formatujemy na np. 00:00:03,500
-        return f"{godziny:02d}:{minuty:02d}:{sek:06.3f}".replace(".", ",")
+    # Our own reliable time formatting function for subtitles
+    def format_time(seconds):
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        secs = seconds % 60
+        # Format as e.g. 00:00:03,500
+        return f"{hours:02d}:{minutes:02d}:{secs:06.3f}".replace(".", ",")
 
-    print("-> Zapisywanie pliku SRT...")
+    print("-> Saving the SRT file...")
 
-    # Ręcznie tworzymy i zapisujemy plik SRT omijając błędy biblioteki
-    with open("lektor_pl.srt", "w", encoding="utf-8") as plik_srt:
-        # Whisper przechowuje każde zdanie w liście "segments"
-        for i, segment in enumerate(wynik["segments"], start=1):
-            start = format_czasu(segment["start"])
-            koniec = format_czasu(segment["end"])
-            tekst = segment["text"].strip()
+    # Manually create and save the SRT file to avoid library issues
+    with open("lektor_pl.srt", "w", encoding="utf-8") as srt_file:
+        # Whisper stores each sentence in the "segments" list
+        for i, segment in enumerate(result["segments"], start=1):
+            start = format_time(segment["start"])
+            end = format_time(segment["end"])
+            text = segment["text"].strip()
 
-            # Wpisujemy do pliku w formacie SRT
-            plik_srt.write(f"{i}\n{start} --> {koniec}\n{tekst}\n\n")
+            # Write the SRT entry
+            srt_file.write(f"{i}\n{start} --> {end}\n{text}\n\n")
 
-    print("-> Zapisano: lektor_pl.srt")
+    print("-> Saved: lektor_pl.srt")
 
 
-def scalaj_wideo():
-    print("\n[KROK 3/3] Renderowanie trzech wariantów wideo (FFmpeg)...")
-    plik_srt = "lektor_pl.srt"
+def merge_videos():
+    print("\n[STEP 3/3] Rendering three video variants (FFmpeg)...")
+    subtitles_file = "lektor_pl.srt"
 
-    if not os.path.exists(WIDEO_ANGIELSKIE):
-        print(f"-> [BŁĄD] Nie znaleziono wideo: {WIDEO_ANGIELSKIE}")
+    if not os.path.exists(SOURCE_VIDEO):
+        print(f"-> [ERROR] Video not found: {SOURCE_VIDEO}")
         return
 
-    # WARIANT 1: Lektor + Napisy (nasz dotychczasowy)
-    print("-> Renderowanie Wariantu 1: Lektor + Napisy (to potrwa najdłużej)...")
-    komenda_pelna = [
+    # VARIANT 1: Voiceover + Subtitles (our standard version)
+    print("-> Rendering Variant 1: Voiceover + Subtitles (this will take the longest)...")
+    full_command = [
         "ffmpeg", "-y",
-        "-i", WIDEO_ANGIELSKIE,
-        "-i", PLIK_AUDIO_PL,
-        "-map", "0:v:0",  # Obraz z oryginału
-        "-map", "1:a:0",  # Dźwięk z polskiego lektora
-        "-vf", f"fps=30,subtitles={plik_srt}",  # Usztywnienie fps i napisy
+        "-i", SOURCE_VIDEO,
+        "-i", POLISH_AUDIO_FILE,
+        "-map", "0:v:0",  # Video from original
+        "-map", "1:a:0",  # Audio from the Polish voiceover
+        "-vf", f"fps=30,subtitles={subtitles_file}",  # Stabilize fps and add subtitles
         "-c:v", "libx264",
         "-c:a", "aac",
-        WIDEO_LEKTOR_NAPISY
+        VIDEO_DUBBED_WITH_SUBTITLES
     ]
 
-    # WARIANT 2: Tylko Lektor, bez napisów
-    print("-> Renderowanie Wariantu 2: Tylko Lektor (błyskawiczne!)...")
-    komenda_tylko_lektor = [
+    # VARIANT 2: Voiceover only, no subtitles
+    print("-> Rendering Variant 2: Voiceover only (very fast!)...")
+    voiceover_only_command = [
         "ffmpeg", "-y",
-        "-i", WIDEO_ANGIELSKIE,
-        "-i", PLIK_AUDIO_PL,
-        "-map", "0:v:0",  # Obraz z oryginału
-        "-map", "1:a:0",  # Dźwięk z polskiego lektora
-        "-c:v", "copy",  # KOPIUJEMY obraz 1:1, bez renderowania!
+        "-i", SOURCE_VIDEO,
+        "-i", POLISH_AUDIO_FILE,
+        "-map", "0:v:0",  # Video from original
+        "-map", "1:a:0",  # Audio from the Polish voiceover
+        "-c:v", "copy",  # Copy the video 1:1, no rendering!
         "-c:a", "aac",
-        WIDEO_TYLKO_LEKTOR
+        VIDEO_DUBBED_ONLY
     ]
 
-    # WARIANT 3: Tylko Napisy (oryginalny angielski dźwięk + polskie napisy)
-    print("-> Renderowanie Wariantu 3: Tylko Napisy z oryginalnym audio...")
-    komenda_tylko_napisy = [
+    # VARIANT 3: Subtitles only (original English audio + Polish subtitles)
+    print("-> Rendering Variant 3: Subtitles only with the original audio...")
+    subtitles_only_command = [
         "ffmpeg", "-y",
-        "-i", WIDEO_ANGIELSKIE,
-        "-map", "0:v:0",  # Obraz z oryginału
-        "-map", "0:a:0",  # Dźwięk z ORYGINAŁU (angielski)
-        "-vf", f"fps=30,subtitles={plik_srt}",  # Napisy
+        "-i", SOURCE_VIDEO,
+        "-map", "0:v:0",  # Video from original
+        "-map", "0:a:0",  # Audio from the original (English)
+        "-vf", f"fps=30,subtitles={subtitles_file}",  # Subtitles
         "-c:v", "libx264",
-        "-c:a", "copy",  # Kopiujemy oryginalne audio bez utraty jakości
-        WIDEO_TYLKO_NAPISY
+        "-c:a", "copy",  # Copy the original audio without quality loss
+        VIDEO_SUBTITLES_ONLY
     ]
 
-    # Odpalenie wszystkich trzech komend po kolei
+    # Run all three commands one after another
     try:
-        subprocess.run(komenda_pelna, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        print(f"   [GOTOWE] {WIDEO_LEKTOR_NAPISY}")
+        subprocess.run(full_command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        print(f"   [DONE] {VIDEO_DUBBED_WITH_SUBTITLES}")
 
-        subprocess.run(komenda_tylko_lektor, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        print(f"   [GOTOWE] {WIDEO_TYLKO_LEKTOR}")
+        subprocess.run(voiceover_only_command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        print(f"   [DONE] {VIDEO_DUBBED_ONLY}")
 
-        subprocess.run(komenda_tylko_napisy, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        print(f"   [GOTOWE] {WIDEO_TYLKO_NAPISY}")
+        subprocess.run(subtitles_only_command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        print(f"   [DONE] {VIDEO_SUBTITLES_ONLY}")
 
-        print("\n[SUKCES] Wszystkie 3 warianty wideo zostały wygenerowane!")
+        print("\n[SUCCESS] All 3 video variants have been generated!")
     except subprocess.CalledProcessError as e:
-        print(f"\n[BŁĄD FFmpeg] Coś poszło nie tak podczas łączenia plików: {e}")
+        print(f"\n[FFmpeg ERROR] Something went wrong while merging the files: {e}")
 
 
 # ==========================================
-# 3. GŁÓWNY PROCES
+# 3. MAIN FLOW
 # ==========================================
 
 async def main():
-    print("=== START AUTOMATYZACJI WIDEO ===")
+    print("=== VIDEO AUTOMATION START ===")
 
-    # Próbujemy wczytać tekst z pliku
-    wczytany_tekst = wczytaj_tekst_z_pliku(PLIK_Z_TEKSTEM)
+    # Try to load text from file
+    loaded_text = read_text_from_file(TEXT_FILE)
 
-    # Jeśli plik nie istnieje lub jest pusty, przerywamy działanie
-    if not wczytany_tekst:
-        print("=== PROCES PRZERWANY ===")
+    # If the file does not exist or is empty, stop
+    if not loaded_text:
+        print("=== PROCESS STOPPED ===")
         return
 
-    # Jeśli tekst się wczytał, kontynuujemy magię
-    await stworz_lektora(wczytany_tekst)
-    stworz_napisy()
-    scalaj_wideo()
+    # If the text was loaded, continue the magic
+    await create_voiceover(loaded_text)
+    create_subtitles()
+    merge_videos()
 
-    print("=== KONIEC ===")
+    print("=== END ===")
 
 
-# Uruchomienie
+# Run the script
 if __name__ == "__main__":
     asyncio.run(main())
