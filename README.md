@@ -177,6 +177,16 @@ Currently configured for Polish (pl), but you can modify:
 
 See `requirements.txt` for exact versions.
 
+## Tests
+
+Run the automated test suite:
+
+```bash
+pytest
+```
+
+The tests are fully mocked and do not require FFmpeg, Whisper models, or network access.
+
 ## License
 
 MIT (or your preferred license)
