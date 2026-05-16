@@ -16,12 +16,12 @@ warnings.filterwarnings("ignore")
 
 
 # Text input file used by the script
-TEXT_FILE = "tekst.txt"
+TEXT_FILE = "Video/tekst.txt"
 
 VOICE = "pl-PL-ZofiaNeural"  # or "pl-PL-ZofiaNeural"
 
 # Working and output file names
-POLISH_AUDIO_FILE = "lektor_pl.mp3"
+POLISH_AUDIO_FILE = "Video/lektor_pl.mp3"
 SOURCE_VIDEO = "wideo_angielskie.mp4"  # Remember to rename it to your own file!
 
 VIDEO_DUBBED_WITH_SUBTITLES = "1_wideo_lektor_napisy.mp4"
@@ -111,7 +111,7 @@ def create_subtitles():
     print("-> Saving the SRT file...")
 
     # Manually create and save the SRT file to avoid library issues
-    with open("lektor_pl.srt", "w", encoding="utf-8") as srt_file:
+    with open("Video/lektor_pl.srt", "w", encoding="utf-8") as srt_file:
         # Whisper stores each sentence in the "segments" list
         for i, segment in enumerate(result["segments"], start=1):
             start = format_time(segment["start"])
@@ -126,7 +126,7 @@ def create_subtitles():
 
 def merge_videos():
     print("\n[STEP 3/3] Rendering three video variants (FFmpeg)...")
-    subtitles_file = "lektor_pl.srt"
+    subtitles_file = "Video/lektor_pl.srt"
 
     if not os.path.exists(SOURCE_VIDEO):
         print(f"-> [ERROR] Video not found: {SOURCE_VIDEO}")
