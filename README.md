@@ -8,13 +8,14 @@ Refactored version with clean, modular architecture.
 - ⏱️ Auto-adjust voiceover speed to match video duration
 - 📝 Automatic subtitle generation from voiceover
 - 🎬 Generate 3 video variants:
-  1. **Dubbed with subtitles** (Polish voiceover + Polish subtitles)
-  2. **Dubbed only** (Polish voiceover, no subtitles)
-  3. **Subtitles only** (Original audio + Polish subtitles)
+    1. **Dubbed with subtitles** (Polish voiceover + Polish subtitles)
+    2. **Dubbed only** (Polish voiceover, no subtitles)
+    3. **Subtitles only** (Original audio + Polish subtitles)
 
 ## Installation
 
 ### Prerequisites
+
 - Python 3.14 (recommended)
 - FFmpeg and FFprobe installed on your system
 - pipenv or pip
@@ -38,6 +39,7 @@ pip install -r requirements.txt
 ## Configuration
 
 Edit `config.py` to customize:
+
 - Input text file path
 - Output file names
 - Voice settings
@@ -88,6 +90,7 @@ Output files: 1_*, 2_*, 3_*
 ## Output Files
 
 After running, you'll get:
+
 - `1_wideo_lektor_napisy.mp4` - Dubbed with Polish subtitles
 - `2_wideo_tylko_lektor.mp4` - Dubbed only
 - `3_wideo_tylko_napisy.mp4` - Subtitles only
@@ -111,6 +114,7 @@ AutoLektor/
 ## Extending the Project
 
 ### Add a New Provider
+
 Example: Adding Google Cloud TTS
 
 ```python
@@ -118,24 +122,27 @@ Example: Adding Google Cloud TTS
 class GoogleTTSProvider:
     def __init__(self, credentials_path):
         self.credentials = load_credentials(credentials_path)
-    
+
     async def generate_voiceover(self, text, output_path):
         # Implementation
         pass
 ```
 
 Then swap in a service:
+
 ```python
 tts_provider = GoogleTTSProvider(credentials_path)
 voiceover_service = VoiceoverService(tts_provider)
 ```
 
 ### Add a New Service
+
 No need to modify existing code - just create a new service and use it in `main()`.
 
 ## Supported Languages
 
 Currently configured for Polish (pl), but you can modify:
+
 - `VOICE` in `config.py` for other TTS voices
 - `TRANSCRIPTION_LANGUAGE` for subtitle generation
 - All voices supported by edge-tts and Whisper
@@ -148,19 +155,19 @@ Currently configured for Polish (pl), but you can modify:
    ```
 
 2. **Run with faster-whisper** for better performance:
-   - Install: `pip install faster-whisper`
-   - Modify `providers/whisper_provider.py`
+    - Install: `pip install faster-whisper`
+    - Modify `providers/whisper_provider.py`
 
 3. **Video rendering can be slow** - be patient with Variant 1
 
 ## Troubleshooting
 
-| Issue | Solution |
-|-------|----------|
-| ffmpeg/ffprobe not found | Install FFmpeg system-wide |
-| Audio file not found | Check `config.py` paths |
-| Whisper model download slow | Models are cached after first use |
-| Subtitle timing off | Check audio file duration vs video |
+| Issue                       | Solution                           |
+|-----------------------------|------------------------------------|
+| ffmpeg/ffprobe not found    | Install FFmpeg system-wide         |
+| Audio file not found        | Check `config.py` paths            |
+| Whisper model download slow | Models are cached after first use  |
+| Subtitle timing off         | Check audio file duration vs video |
 
 ## Dependencies
 

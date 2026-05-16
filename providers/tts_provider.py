@@ -29,4 +29,3 @@ class TTSProvider:
                 raise TypeError("rate must be a string like '+10%'")
             communicate = edge_tts.Communicate(text, self.voice, rate=rate)
         await communicate.save(output_path)
-

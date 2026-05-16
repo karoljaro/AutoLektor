@@ -27,28 +27,35 @@ AutoLektor/
 ## Architecture Layers
 
 ### 1. **Config Layer** (`config.py`)
+
 - Centralized configuration management
 - All constants and settings in one place
 - Easy to maintain and modify
 
 ### 2. **Helper Layer** (`helpers/`)
+
 - **file_helpers.py**: Text file operations
 - **time_helpers.py**: SRT time format conversion
 - **duration_helpers.py**: Media file duration measurement
 
 ### 3. **Provider Layer** (`providers/`)
+
 Wraps external libraries with clear interfaces:
+
 - **TTSProvider**: Edge-TTS text-to-speech
 - **WhisperProvider**: OpenAI Whisper speech-to-text
 - **FFmpegProvider**: FFmpeg video operations
 
 ### 4. **Service Layer** (`services/`)
+
 Orchestrates business logic:
+
 - **VoiceoverService**: Generates and auto-adjusts voiceover speed
 - **SubtitleService**: Generates SRT subtitles from audio
 - **VideoService**: Renders 3 video variants
 
 ### 5. **Main Layer** (`main.py`)
+
 - Initializes all services and providers
 - Orchestrates the workflow
 - Minimal business logic
@@ -80,13 +87,16 @@ Output: 3 Video Files
 ## Design Patterns
 
 ### Dependency Injection
+
 Services receive providers as dependencies:
+
 ```python
 voiceover_service = VoiceoverService(tts_provider)
 subtitle_service = SubtitleService(whisper_provider)
 ```
 
 ### Separation of Concerns
+
 - Providers: Handle library-specific details
 - Services: Contain business logic
 - Helpers: Provide utility functions
@@ -94,7 +104,9 @@ subtitle_service = SubtitleService(whisper_provider)
 - Main: Orchestrate the workflow
 
 ### Single Responsibility Principle
+
 Each class/module has one clear purpose:
+
 - `TTSProvider` → wraps TTS
 - `VoiceoverService` → manages voiceover generation and speed adjustment
 - `file_helpers` → file operations
@@ -102,23 +114,27 @@ Each class/module has one clear purpose:
 ## How to Extend
 
 ### Add a new provider:
+
 1. Create `providers/new_provider.py`
 2. Define a class with clear methods
 3. Import and use in services
 
 ### Add a new service:
+
 1. Create `services/new_service.py`
 2. Use providers as dependencies
 3. Implement business logic
 4. Import in `main.py`
 
 ### Add configuration:
+
 1. Add constants to `config.py`
 2. Import where needed
 
 ## Testing
 
 Each layer can be tested independently:
+
 - **Helpers**: Unit tests for utility functions
 - **Providers**: Mock external libraries
 - **Services**: Integration tests with providers
