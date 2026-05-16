@@ -3,12 +3,13 @@ Subtitle Service - orchestrates subtitle generation.
 """
 
 from helpers.time_helpers import format_time
+from providers.protocols import WhisperProtocol
 
 
 class SubtitleService:
     """Service for generating SRT subtitles from audio."""
 
-    def __init__(self, whisper_provider) -> None:
+    def __init__(self, whisper_provider: WhisperProtocol) -> None:
         """
         Initialize Subtitle Service.
 

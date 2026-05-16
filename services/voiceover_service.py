@@ -4,12 +4,13 @@ import math
 
 from helpers.duration_helpers import get_duration
 from helpers.file_helpers import file_exists
+from providers.protocols import TTSProtocol
 
 
 class VoiceoverService:
     """Service for generating and adjusting voiceovers."""
 
-    def __init__(self, tts_provider) -> None:
+    def __init__(self, tts_provider: TTSProtocol) -> None:
         """Initialize Voiceover service.
 
         Args:
