@@ -2,7 +2,11 @@
 
 Use `from logger import get_logger` and then `logger = get_logger(__name__)`.
 """
+
+from __future__ import annotations
+
 import logging
+import os
 import sys
 
 LOGGER_NAME = "autolektor"
@@ -14,8 +18,14 @@ if not _logger.handlers:
     handler.setFormatter(formatter)
     _logger.addHandler(handler)
 
+
+def _resolve_log_level(default: str = "INFO") -> int:
+    raw_level = os.getenv("AUTOLEKTOR_LOG_LEVEL", default).strip().upper()
+    return getattr(logging, raw_level, logging.INFO)
+
+
 # Default level can be adjusted by environment or later in code
-_logger.setLevel(logging.INFO)
+_logger.setLevel(_resolve_log_level())
 
 
 def get_logger(name: str | None = None) -> logging.Logger:

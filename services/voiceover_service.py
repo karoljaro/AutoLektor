@@ -4,6 +4,7 @@ import math
 
 from helpers.duration_helpers import get_duration
 from helpers.file_helpers import file_exists
+from helpers.preflight import ensure_parent_dirs_exist
 from providers.protocols import TTSProtocol
 from logger import get_logger
 
@@ -39,6 +40,8 @@ class VoiceoverService:
         if not file_exists(source_video_path):
             raise FileNotFoundError(f"Source video not found: {source_video_path}")
 
+        ensure_parent_dirs_exist(output_audio_path)
+
         # Generate initial voiceover
         await self.tts_provider.generate_voiceover(text, output_audio_path)
 
@@ -48,6 +51,8 @@ class VoiceoverService:
 
         if video_duration <= 0:
             raise ValueError(f"Source video duration must be > 0, got {video_duration}")
+        if audio_duration <= 0:
+            raise ValueError(f"Generated audio duration must be > 0, got {audio_duration}")
 
         logger.info("-> Video duration: %.2f s", video_duration)
         logger.info("-> Audio duration: %.2f s", audio_duration)

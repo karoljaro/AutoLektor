@@ -3,6 +3,7 @@ Subtitle Service - orchestrates subtitle generation.
 """
 
 from helpers.time_helpers import format_time
+from helpers.preflight import ensure_parent_dirs_exist
 from providers.protocols import WhisperProtocol
 from logger import get_logger
 
@@ -35,6 +36,11 @@ class SubtitleService:
         # Transcribe audio
         result = self.whisper_provider.transcribe(audio_path, language=language)
         segments = result.get("segments", [])
+
+        ensure_parent_dirs_exist(output_srt_path)
+
+        if not isinstance(segments, list):
+            raise TypeError("Whisper transcription result must contain a list under 'segments'")
 
         logger.info("-> Saving the SRT file...")
 

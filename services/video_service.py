@@ -34,6 +34,11 @@ class VideoService:
         """
         logger.info("\n[STEP 3/3] Rendering three video variants (FFmpeg)...")
 
+        required_keys = {"full", "dubbed", "subtitles_only"}
+        missing_keys = required_keys.difference(output_paths)
+        if missing_keys:
+            raise ValueError(f"Missing output paths for variants: {', '.join(sorted(missing_keys))}")
+
         if not file_exists(source_video):
             logger.error("-> [ERROR] Video not found: %s", source_video)
             return False

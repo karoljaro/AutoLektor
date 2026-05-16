@@ -4,6 +4,7 @@ import subprocess
 from collections.abc import Sequence
 
 from config import AUDIO_CODEC, VIDEO_CODEC, VIDEO_FPS
+from helpers.preflight import ensure_commands_available, escape_ffmpeg_filter_path
 
 
 class FFmpegProvider:
@@ -12,8 +13,9 @@ class FFmpegProvider:
     @staticmethod
     def _run_ffmpeg(command: Sequence[str]) -> None:
         """Run FFmpeg command and re-raise readable errors."""
+        ensure_commands_available("ffmpeg")
         try:
-            subprocess.run(command, check=True, capture_output=True, text=True)
+            subprocess.run(command, check=True, capture_output=True, text=True, stdin=subprocess.DEVNULL)
         except subprocess.CalledProcessError as exc:
             details = (exc.stderr or exc.stdout or "unknown ffmpeg error").strip()
             raise RuntimeError(f"FFmpeg command failed: {details}") from exc
@@ -39,19 +41,19 @@ class FFmpegProvider:
         match variant:
             case "full":
                 command = [
-                    "ffmpeg", "-y",
+                    "ffmpeg", "-hide_banner", "-nostdin", "-y",
                     "-i", source_video,
                     "-i", dubbed_audio,
                     "-map", "0:v:0",
                     "-map", "1:a:0",
-                    "-vf", f"fps={VIDEO_FPS},subtitles={subtitles_file}",
+                    "-vf", f"fps={VIDEO_FPS},subtitles={escape_ffmpeg_filter_path(subtitles_file)}",
                     "-c:v", VIDEO_CODEC,
                     "-c:a", AUDIO_CODEC,
                     output_path
                 ]
             case "dubbed":
                 command = [
-                    "ffmpeg", "-y",
+                    "ffmpeg", "-hide_banner", "-nostdin", "-y",
                     "-i", source_video,
                     "-i", dubbed_audio,
                     "-map", "0:v:0",
@@ -62,11 +64,11 @@ class FFmpegProvider:
                 ]
             case "subtitles_only":
                 command = [
-                    "ffmpeg", "-y",
+                    "ffmpeg", "-hide_banner", "-nostdin", "-y",
                     "-i", source_video,
                     "-map", "0:v:0",
                     "-map", "0:a:0",
-                    "-vf", f"fps={VIDEO_FPS},subtitles={subtitles_file}",
+                    "-vf", f"fps={VIDEO_FPS},subtitles={escape_ffmpeg_filter_path(subtitles_file)}",
                     "-c:v", VIDEO_CODEC,
                     "-c:a", "copy",
                     output_path
