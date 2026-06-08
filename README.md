@@ -1,201 +1,148 @@
-# Video Automation - Auto-Dubbed & Subtitled Video Generator
+# AutoLektor
 
-Refactored version with clean, modular architecture.
+Python tool for generating Polish voiceover, subtitles and video variants from a source video and text input.
+
+AutoLektor automates a simple video post-production workflow: it generates a text-to-speech voiceover, creates subtitles from the generated audio and renders multiple output video variants.
 
 ## Features
 
-- 🎤 Automatic text-to-speech voiceover generation (Polish)
-- ⏱️ Auto-adjust voiceover speed to match video duration
-- 📝 Automatic subtitle generation from voiceover
-- 🎬 Generate 3 video variants:
-    1. **Dubbed with subtitles** (Polish voiceover + Polish subtitles)
-    2. **Dubbed only** (Polish voiceover, no subtitles)
-    3. **Subtitles only** (Original audio + Polish subtitles)
+- Generate Polish voiceover from text using `edge-tts`
+- Automatically adjust voiceover speed to match the source video duration
+- Generate subtitles from voiceover audio using Whisper
+- Render multiple video variants:
+  - dubbed video with subtitles
+  - dubbed video without subtitles
+  - original video with subtitles
+- Modular project structure with providers and services
+- Preflight checks, logging and automated tests
+
+## Tech Stack
+
+- Python
+- edge-tts
+- OpenAI Whisper
+- FFmpeg / FFprobe
+- pytest
+
+## How It Works
+
+```text
+Input video + text file
+        ↓
+Generate voiceover with edge-tts
+        ↓
+Adjust voiceover speed if needed
+        ↓
+Generate subtitles with Whisper
+        ↓
+Render video variants with FFmpeg
+        ↓
+Output: video files, audio track and subtitles
+```
 
 ## Installation
 
 ### Prerequisites
 
-- Python 3.14 (recommended)
-- FFmpeg and FFprobe installed on your system
-- pipenv or pip
+- Python 3.14 recommended
+- FFmpeg and FFprobe installed system-wide
+- pip
 
 ### Setup
 
 ```bash
-# Clone or navigate to project
+git clone https://github.com/karoljaro/AutoLektor.git
 cd AutoLektor
 
-# Create virtual environment
 python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
 
-# Activate virtual environment
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-
-# Install dependencies
 pip install -r requirements.txt
 ```
 
 ## Configuration
 
-Edit `config.py` to customize:
+Edit `config.py` to configure:
 
-- Input text file path
-- Output file names
-- Voice settings
-- Whisper model (base, small, medium, large)
+- input video path
+- input text file path
+- output file names
+- TTS voice
+- Whisper model
+- transcription language
+
+By default, the project is configured for Polish voiceover and subtitles.
 
 ## Usage
 
-### Prepare Input
+### 1. Prepare input files
 
-1. Place your source video in the project root:
-   ```
-   wideo_angielskie.mp4
-   ```
+Place the source video in the project root:
 
-2. Place your text file in the Video/ folder:
-   ```
-   Video/tekst.txt
-   ```
+```text
+wideo_angielskie.mp4
+```
 
-### Run the Script
+Place the text file in the `Video/` directory:
+
+```text
+Video/tekst.txt
+```
+
+### 2. Run the script
 
 ```bash
 python main.py
 ```
 
-### Process Steps
-
-```
-[STEP 0/3] Load text from file
-           ↓
-[STEP 1/3] Generate and auto-adjust voiceover
-           ├─ Generate audio with edge-tts
-           ├─ Measure durations
-           └─ Auto-speed if needed
-           ↓
-[STEP 2/3] Generate subtitles
-           ├─ Transcribe with Whisper
-           └─ Save SRT file
-           ↓
-[STEP 3/3] Render video variants
-           ├─ Variant 1: Dubbed + Subtitles (longest)
-           ├─ Variant 2: Dubbed only (fast)
-           └─ Variant 3: Subtitles only
-           ↓
-Output files: 1_*, 2_*, 3_*
-```
-
 ## Output Files
 
-After running, you'll get:
+After processing, the project generates:
 
-- `1_wideo_lektor_napisy.mp4` - Dubbed with Polish subtitles
-- `2_wideo_tylko_lektor.mp4` - Dubbed only
-- `3_wideo_tylko_napisy.mp4` - Subtitles only
-- `Video/lektor_pl.mp3` - Generated audio track
-- `Video/lektor_pl.srt` - Generated subtitle file
+```text
+1_wideo_lektor_napisy.mp4    # dubbed video with subtitles
+2_wideo_tylko_lektor.mp4     # dubbed video only
+3_wideo_tylko_napisy.mp4     # original audio with subtitles
+Video/lektor_pl.mp3          # generated voiceover
+Video/lektor_pl.srt          # generated subtitles
+```
 
 ## Project Structure
 
-See `ARCHITECTURE.md` for detailed architecture documentation.
-
-```
+```text
 AutoLektor/
-├── main.py                  # Entry point & orchestration
-├── config.py                # Configuration
-├── helpers/                 # Utilities (file, time, duration)
-├── providers/               # Library wrappers (TTS, Whisper, FFmpeg)
-├── services/                # Business logic (voiceover, subtitles, video)
+├── main.py                  # Entry point and orchestration
+├── config.py                # Project configuration
+├── logger.py                # Logging setup
+├── helpers/                 # File, time and duration utilities
+├── providers/               # Wrappers for TTS, Whisper and FFmpeg
+├── services/                # Voiceover, subtitle and video logic
+├── tests/                   # Automated tests
 └── Video/                   # Working directory
 ```
 
-## Extending the Project
-
-### Add a New Provider
-
-Example: Adding Google Cloud TTS
-
-```python
-# providers/google_tts_provider.py
-class GoogleTTSProvider:
-    def __init__(self, credentials_path):
-        self.credentials = load_credentials(credentials_path)
-
-    async def generate_voiceover(self, text, output_path):
-        # Implementation
-        pass
-```
-
-Then swap in a service:
-
-```python
-tts_provider = GoogleTTSProvider(credentials_path)
-voiceover_service = VoiceoverService(tts_provider)
-```
-
-### Add a New Service
-
-No need to modify existing code - just create a new service and use it in `main()`.
-
-## Supported Languages
-
-Currently configured for Polish (pl), but you can modify:
-
-- `VOICE` in `config.py` for other TTS voices
-- `TRANSCRIPTION_LANGUAGE` for subtitle generation
-- All voices supported by edge-tts and Whisper
-
-## Performance Tips
-
-1. **Use smaller Whisper model** for faster subtitle generation:
-   ```python
-   WHISPER_MODEL = "tiny"  # or "base" (default)
-   ```
-
-2. **Run with faster-whisper** for better performance:
-    - Install: `pip install faster-whisper`
-    - Modify `providers/whisper_provider.py`
-
-3. **Video rendering can be slow** - be patient with Variant 1
-
-## Troubleshooting
-
-| Issue                       | Solution                           |
-|-----------------------------|------------------------------------|
-| ffmpeg/ffprobe not found    | Install FFmpeg system-wide         |
-| Audio file not found        | Check `config.py` paths            |
-| Whisper model download slow | Models are cached after first use  |
-| Subtitle timing off         | Check audio file duration vs video |
-
-## Dependencies
-
-- `edge-tts` - Text-to-speech
-- `openai-whisper` - Speech-to-text
-- `ffmpeg-python` - Video operations (via subprocess)
-
-See `requirements.txt` for exact versions.
+For more details, see [`ARCHITECTURE.md`](./ARCHITECTURE.md).
 
 ## Tests
 
-Run the automated test suite:
+Run the test suite:
 
 ```bash
 pytest
 ```
 
-The tests are fully mocked and do not require FFmpeg, Whisper models, or network access.
+The tests are mocked and do not require FFmpeg, Whisper models or network access.
+
+## Notes
+
+- Video rendering time depends on the source video length and selected output variant.
+- Whisper models are downloaded on first use and cached locally.
+- The project is currently optimized for Polish voiceover and subtitles, but other languages can be configured in `config.py`.
 
 ## License
 
-MIT (or your preferred license)
+MIT
 
 ## Author
 
-Video Automation Project
-
----
-
-**Documentation**: See `ARCHITECTURE.md` for technical details.
-
+Karol Jaroń
