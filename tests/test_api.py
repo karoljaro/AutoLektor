@@ -61,6 +61,51 @@ def test_render_voiceover_returns_mp3(monkeypatch) -> None:
     assert calls == [("Test lektora", b"fake video")]
 
 
+def test_render_subtitles_returns_srt(monkeypatch) -> None:
+    calls = []
+
+    class FakeVoiceoverService:
+        def __init__(self, tts_provider) -> None:
+            self.tts_provider = tts_provider
+
+        async def create_and_adjust_voiceover(self, text, source_video_path, output_audio_path) -> None:
+            calls.append(("voiceover", text, Path(source_video_path).read_bytes()))
+            Path(output_audio_path).write_bytes(b"fake mp3")
+
+    class FakeSubtitleService:
+        def __init__(self, whisper_provider) -> None:
+            self.whisper_provider = whisper_provider
+
+        def generate_srt_from_audio(self, audio_path, output_srt_path, language="pl") -> None:
+            calls.append(("subtitles", Path(audio_path).read_bytes(), language))
+            Path(output_srt_path).write_text("1\n00:00:00,000 --> 00:00:01,000\nTest\n\n", encoding="utf-8")
+
+    monkeypatch.setattr("api.TTSProvider", lambda voice: object())
+    monkeypatch.setattr("api.WhisperProvider", lambda model_name: object())
+    monkeypatch.setattr("api.VoiceoverService", FakeVoiceoverService)
+    monkeypatch.setattr("api.SubtitleService", FakeSubtitleService)
+
+    async def run_test() -> None:
+        response = await render(
+            video=FakeUpload(b"fake video"),
+            text="Test napisow",
+            variant="subtitles",
+        )
+
+        try:
+            assert response.status_code == 200
+            assert response.media_type == "application/x-subrip"
+            assert Path(response.path).read_text(encoding="utf-8").startswith("1\n00:00:00,000")
+        finally:
+            await response.background()
+
+    asyncio.run(run_test())
+    assert calls == [
+        ("voiceover", "Test napisow", b"fake video"),
+        ("subtitles", b"fake mp3", "pl"),
+    ]
+
+
 def test_render_requires_text() -> None:
     with pytest.raises(HTTPException) as exc_info:
         asyncio.run(render(video=FakeUpload(b"fake video"), text="   ", variant="voiceover"))
@@ -71,7 +116,7 @@ def test_render_requires_text() -> None:
 
 def test_render_rejects_unsupported_variant() -> None:
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(render(video=FakeUpload(b"fake video"), text="Test", variant="subtitles"))
+        asyncio.run(render(video=FakeUpload(b"fake video"), text="Test", variant="bad"))
 
     assert exc_info.value.status_code == 400
-    assert exc_info.value.detail == "unsupported variant: subtitles"
+    assert exc_info.value.detail == "unsupported variant: bad"
