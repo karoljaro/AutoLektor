@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
 
 from config import TRANSCRIPTION_LANGUAGE, VOICE, WHISPER_MODEL
+from providers.ffmpeg_provider import FFmpegProvider
 from providers.tts_provider import TTSProvider
 from providers.whisper_provider import WhisperProvider
 from services.subtitle_service import SubtitleService
@@ -17,7 +18,7 @@ from services.voiceover_service import VoiceoverService
 
 app = FastAPI(title="AutoLektor API")
 CHUNK_SIZE = 1024 * 1024
-SUPPORTED_VARIANTS = {"voiceover", "subtitles"}
+SUPPORTED_VARIANTS = {"voiceover", "subtitles", "dubbed"}
 
 
 @app.get("/health")
@@ -52,6 +53,7 @@ async def render(
     source_video = work_dir / "source.mp4"
     output_audio = work_dir / "voiceover.mp3"
     output_srt = work_dir / "subtitles.srt"
+    output_video = work_dir / "dubbed.mp4"
 
     try:
         await save_upload(video, source_video)
@@ -68,6 +70,14 @@ async def render(
                 output_srt_path=str(output_srt),
                 language=TRANSCRIPTION_LANGUAGE,
             )
+        elif variant == "dubbed":
+            FFmpegProvider.merge_videos(
+                source_video=str(source_video),
+                dubbed_audio=str(output_audio),
+                subtitles_file=str(output_srt),
+                output_path=str(output_video),
+                variant="dubbed",
+            )
     except Exception:
         shutil.rmtree(work_dir, ignore_errors=True)
         raise
@@ -76,6 +86,10 @@ async def render(
         response_path = output_srt
         media_type = "application/x-subrip"
         filename = "subtitles.srt"
+    elif variant == "dubbed":
+        response_path = output_video
+        media_type = "video/mp4"
+        filename = "dubbed.mp4"
     else:
         response_path = output_audio
         media_type = "audio/mpeg"
