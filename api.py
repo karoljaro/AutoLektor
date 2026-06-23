@@ -18,7 +18,14 @@ from services.voiceover_service import VoiceoverService
 
 app = FastAPI(title="AutoLektor API")
 CHUNK_SIZE = 1024 * 1024
-SUPPORTED_VARIANTS = {"voiceover", "subtitles", "dubbed", "subtitled"}
+SUPPORTED_VARIANTS = {"voiceover", "subtitles", "dubbed", "subtitled", "full"}
+SUBTITLE_VARIANTS = {"subtitles", "subtitled", "full"}
+VIDEO_VARIANTS = {"dubbed", "subtitled", "full"}
+FFMPEG_VARIANTS = {
+    "dubbed": "dubbed",
+    "subtitled": "subtitles_only",
+    "full": "full",
+}
 
 
 @app.get("/health")
@@ -63,21 +70,20 @@ async def render(
             source_video_path=str(source_video),
             output_audio_path=str(output_audio),
         )
-        if variant in {"subtitles", "subtitled"}:
+        if variant in SUBTITLE_VARIANTS:
             subtitle_service = SubtitleService(WhisperProvider(model_name=WHISPER_MODEL))
             subtitle_service.generate_srt_from_audio(
                 audio_path=str(output_audio),
                 output_srt_path=str(output_srt),
                 language=TRANSCRIPTION_LANGUAGE,
             )
-        if variant in {"dubbed", "subtitled"}:
-            ffmpeg_variant = "subtitles_only" if variant == "subtitled" else "dubbed"
+        if variant in VIDEO_VARIANTS:
             FFmpegProvider.merge_videos(
                 source_video=str(source_video),
                 dubbed_audio=str(output_audio),
                 subtitles_file=str(output_srt),
                 output_path=str(output_video),
-                variant=ffmpeg_variant,
+                variant=FFMPEG_VARIANTS[variant],
             )
     except Exception:
         shutil.rmtree(work_dir, ignore_errors=True)
@@ -87,7 +93,7 @@ async def render(
         response_path = output_srt
         media_type = "application/x-subrip"
         filename = "subtitles.srt"
-    elif variant in {"dubbed", "subtitled"}:
+    elif variant in VIDEO_VARIANTS:
         response_path = output_video
         media_type = "video/mp4"
         filename = f"{variant}.mp4"

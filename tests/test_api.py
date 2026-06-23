@@ -208,6 +208,63 @@ def test_render_subtitled_returns_mp4(monkeypatch) -> None:
     ]
 
 
+def test_render_full_returns_mp4(monkeypatch) -> None:
+    calls = []
+
+    class FakeVoiceoverService:
+        def __init__(self, tts_provider) -> None:
+            self.tts_provider = tts_provider
+
+        async def create_and_adjust_voiceover(self, text, source_video_path, output_audio_path) -> None:
+            calls.append(("voiceover", text, Path(source_video_path).read_bytes()))
+            Path(output_audio_path).write_bytes(b"fake mp3")
+
+    class FakeSubtitleService:
+        def __init__(self, whisper_provider) -> None:
+            self.whisper_provider = whisper_provider
+
+        def generate_srt_from_audio(self, audio_path, output_srt_path, language="pl") -> None:
+            calls.append(("subtitles", Path(audio_path).read_bytes(), language))
+            Path(output_srt_path).write_text("fake srt", encoding="utf-8")
+
+    def fake_merge_videos(source_video, dubbed_audio, subtitles_file, output_path, variant="full") -> None:
+        calls.append((
+            "ffmpeg",
+            Path(source_video).read_bytes(),
+            Path(dubbed_audio).read_bytes(),
+            Path(subtitles_file).read_text(encoding="utf-8"),
+            variant,
+        ))
+        Path(output_path).write_bytes(b"fake full mp4")
+
+    monkeypatch.setattr("api.TTSProvider", lambda voice: object())
+    monkeypatch.setattr("api.WhisperProvider", lambda model_name: object())
+    monkeypatch.setattr("api.VoiceoverService", FakeVoiceoverService)
+    monkeypatch.setattr("api.SubtitleService", FakeSubtitleService)
+    monkeypatch.setattr("api.FFmpegProvider.merge_videos", fake_merge_videos)
+
+    async def run_test() -> None:
+        response = await render(
+            video=FakeUpload(b"fake video"),
+            text="Test pelnego filmu",
+            variant="full",
+        )
+
+        try:
+            assert response.status_code == 200
+            assert response.media_type == "video/mp4"
+            assert Path(response.path).read_bytes() == b"fake full mp4"
+        finally:
+            await response.background()
+
+    asyncio.run(run_test())
+    assert calls == [
+        ("voiceover", "Test pelnego filmu", b"fake video"),
+        ("subtitles", b"fake mp3", "pl"),
+        ("ffmpeg", b"fake video", b"fake mp3", "fake srt", "full"),
+    ]
+
+
 def test_render_requires_text() -> None:
     with pytest.raises(HTTPException) as exc_info:
         asyncio.run(render(video=FakeUpload(b"fake video"), text="   ", variant="voiceover"))
