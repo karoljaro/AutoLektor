@@ -6,7 +6,11 @@ from pathlib import Path
 import pytest
 from fastapi import HTTPException
 
-from api import app, health, render
+from api import VARIANTS, app, health, render
+
+FAKE_VIDEO = b"fake video"
+FAKE_AUDIO = b"fake mp3"
+FAKE_SRT = "fake srt"
 
 
 class FakeUpload:
@@ -21,6 +25,62 @@ class FakeUpload:
         return self.content
 
 
+def patch_pipeline(
+    monkeypatch,
+    calls: list[tuple],
+    *,
+    subtitles: bool = False,
+    ffmpeg_output: bytes | None = None,
+) -> None:
+    class FakeVoiceoverService:
+        def __init__(self, tts_provider) -> None:
+            self.tts_provider = tts_provider
+
+        async def create_and_adjust_voiceover(self, text, source_video_path, output_audio_path) -> None:
+            calls.append(("voiceover", text, Path(source_video_path).read_bytes()))
+            Path(output_audio_path).write_bytes(FAKE_AUDIO)
+
+    monkeypatch.setattr("api.TTSProvider", lambda voice: object())
+    monkeypatch.setattr("api.VoiceoverService", FakeVoiceoverService)
+
+    if subtitles:
+        class FakeSubtitleService:
+            def __init__(self, whisper_provider) -> None:
+                self.whisper_provider = whisper_provider
+
+            def generate_srt_from_audio(self, audio_path, output_srt_path, language="pl") -> None:
+                calls.append(("subtitles", Path(audio_path).read_bytes(), language))
+                Path(output_srt_path).write_text(FAKE_SRT, encoding="utf-8")
+
+        monkeypatch.setattr("api.WhisperProvider", lambda model_name: object())
+        monkeypatch.setattr("api.SubtitleService", FakeSubtitleService)
+
+    if ffmpeg_output is not None:
+        def fake_merge_videos(source_video, dubbed_audio, subtitles_file, output_path, variant="full") -> None:
+            subtitles_path = Path(subtitles_file)
+            calls.append((
+                "ffmpeg",
+                Path(source_video).read_bytes(),
+                Path(dubbed_audio).read_bytes(),
+                subtitles_path.read_text(encoding="utf-8") if subtitles_path.exists() else None,
+                variant,
+            ))
+            Path(output_path).write_bytes(ffmpeg_output)
+
+        monkeypatch.setattr("api.FFmpegProvider.merge_videos", fake_merge_videos)
+
+
+def run_render(variant: str, *, text: str = "Test", video: bytes = FAKE_VIDEO) -> tuple[int, str, bytes]:
+    async def run_test() -> tuple[int, str, bytes]:
+        response = await render(video=FakeUpload(video), text=text, variant=variant)
+        try:
+            return response.status_code, response.media_type, Path(response.path).read_bytes()
+        finally:
+            await response.background()
+
+    return asyncio.run(run_test())
+
+
 def test_health() -> None:
     assert health() == {"status": "ok"}
 
@@ -29,245 +89,77 @@ def test_render_route_is_registered() -> None:
     assert any(route.path == "/render" and "POST" in route.methods for route in app.routes)
 
 
+def test_variant_contract() -> None:
+    assert set(VARIANTS) == {"voiceover", "subtitles", "dubbed", "subtitled", "full"}
+
+
 def test_render_voiceover_returns_mp3(monkeypatch) -> None:
     calls = []
+    patch_pipeline(monkeypatch, calls)
 
-    class FakeVoiceoverService:
-        def __init__(self, tts_provider) -> None:
-            self.tts_provider = tts_provider
+    status_code, media_type, body = run_render("voiceover", text="  Test lektora  ")
 
-        async def create_and_adjust_voiceover(self, text, source_video_path, output_audio_path) -> None:
-            calls.append((text, Path(source_video_path).read_bytes()))
-            Path(output_audio_path).write_bytes(b"fake mp3")
-
-    monkeypatch.setattr("api.TTSProvider", lambda voice: object())
-    monkeypatch.setattr("api.VoiceoverService", FakeVoiceoverService)
-
-    async def run_test() -> None:
-        response = await render(
-            video=FakeUpload(b"fake video"),
-            text="  Test lektora  ",
-            variant="voiceover",
-        )
-
-        try:
-            assert response.status_code == 200
-            assert response.media_type == "audio/mpeg"
-            assert Path(response.path).read_bytes() == b"fake mp3"
-        finally:
-            await response.background()
-
-    asyncio.run(run_test())
-    assert calls == [("Test lektora", b"fake video")]
+    assert (status_code, media_type, body) == (200, "audio/mpeg", FAKE_AUDIO)
+    assert calls == [("voiceover", "Test lektora", FAKE_VIDEO)]
 
 
 def test_render_subtitles_returns_srt(monkeypatch) -> None:
     calls = []
+    patch_pipeline(monkeypatch, calls, subtitles=True)
 
-    class FakeVoiceoverService:
-        def __init__(self, tts_provider) -> None:
-            self.tts_provider = tts_provider
+    status_code, media_type, body = run_render("subtitles", text="Test napisow")
 
-        async def create_and_adjust_voiceover(self, text, source_video_path, output_audio_path) -> None:
-            calls.append(("voiceover", text, Path(source_video_path).read_bytes()))
-            Path(output_audio_path).write_bytes(b"fake mp3")
-
-    class FakeSubtitleService:
-        def __init__(self, whisper_provider) -> None:
-            self.whisper_provider = whisper_provider
-
-        def generate_srt_from_audio(self, audio_path, output_srt_path, language="pl") -> None:
-            calls.append(("subtitles", Path(audio_path).read_bytes(), language))
-            Path(output_srt_path).write_text("1\n00:00:00,000 --> 00:00:01,000\nTest\n\n", encoding="utf-8")
-
-    monkeypatch.setattr("api.TTSProvider", lambda voice: object())
-    monkeypatch.setattr("api.WhisperProvider", lambda model_name: object())
-    monkeypatch.setattr("api.VoiceoverService", FakeVoiceoverService)
-    monkeypatch.setattr("api.SubtitleService", FakeSubtitleService)
-
-    async def run_test() -> None:
-        response = await render(
-            video=FakeUpload(b"fake video"),
-            text="Test napisow",
-            variant="subtitles",
-        )
-
-        try:
-            assert response.status_code == 200
-            assert response.media_type == "application/x-subrip"
-            assert Path(response.path).read_text(encoding="utf-8").startswith("1\n00:00:00,000")
-        finally:
-            await response.background()
-
-    asyncio.run(run_test())
+    assert (status_code, media_type, body) == (200, "application/x-subrip", FAKE_SRT.encode())
     assert calls == [
-        ("voiceover", "Test napisow", b"fake video"),
-        ("subtitles", b"fake mp3", "pl"),
+        ("voiceover", "Test napisow", FAKE_VIDEO),
+        ("subtitles", FAKE_AUDIO, "pl"),
     ]
 
 
 def test_render_dubbed_returns_mp4(monkeypatch) -> None:
     calls = []
+    patch_pipeline(monkeypatch, calls, ffmpeg_output=b"fake dubbed mp4")
 
-    class FakeVoiceoverService:
-        def __init__(self, tts_provider) -> None:
-            self.tts_provider = tts_provider
+    status_code, media_type, body = run_render("dubbed", text="Test dubbingu")
 
-        async def create_and_adjust_voiceover(self, text, source_video_path, output_audio_path) -> None:
-            calls.append(("voiceover", text, Path(source_video_path).read_bytes()))
-            Path(output_audio_path).write_bytes(b"fake mp3")
-
-    def fake_merge_videos(source_video, dubbed_audio, subtitles_file, output_path, variant="full") -> None:
-        calls.append((
-            "ffmpeg",
-            Path(source_video).read_bytes(),
-            Path(dubbed_audio).read_bytes(),
-            subtitles_file.endswith("subtitles.srt"),
-            variant,
-        ))
-        Path(output_path).write_bytes(b"fake mp4")
-
-    monkeypatch.setattr("api.TTSProvider", lambda voice: object())
-    monkeypatch.setattr("api.VoiceoverService", FakeVoiceoverService)
-    monkeypatch.setattr("api.FFmpegProvider.merge_videos", fake_merge_videos)
-
-    async def run_test() -> None:
-        response = await render(
-            video=FakeUpload(b"fake video"),
-            text="Test dubbingu",
-            variant="dubbed",
-        )
-
-        try:
-            assert response.status_code == 200
-            assert response.media_type == "video/mp4"
-            assert Path(response.path).read_bytes() == b"fake mp4"
-        finally:
-            await response.background()
-
-    asyncio.run(run_test())
+    assert (status_code, media_type, body) == (200, "video/mp4", b"fake dubbed mp4")
     assert calls == [
-        ("voiceover", "Test dubbingu", b"fake video"),
-        ("ffmpeg", b"fake video", b"fake mp3", True, "dubbed"),
+        ("voiceover", "Test dubbingu", FAKE_VIDEO),
+        ("ffmpeg", FAKE_VIDEO, FAKE_AUDIO, None, "dubbed"),
     ]
 
 
 def test_render_subtitled_returns_mp4(monkeypatch) -> None:
     calls = []
+    patch_pipeline(monkeypatch, calls, subtitles=True, ffmpeg_output=b"fake subtitled mp4")
 
-    class FakeVoiceoverService:
-        def __init__(self, tts_provider) -> None:
-            self.tts_provider = tts_provider
+    status_code, media_type, body = run_render("subtitled", text="Test napisow w filmie")
 
-        async def create_and_adjust_voiceover(self, text, source_video_path, output_audio_path) -> None:
-            calls.append(("voiceover", text, Path(source_video_path).read_bytes()))
-            Path(output_audio_path).write_bytes(b"fake mp3")
-
-    class FakeSubtitleService:
-        def __init__(self, whisper_provider) -> None:
-            self.whisper_provider = whisper_provider
-
-        def generate_srt_from_audio(self, audio_path, output_srt_path, language="pl") -> None:
-            calls.append(("subtitles", Path(audio_path).read_bytes(), language))
-            Path(output_srt_path).write_text("fake srt", encoding="utf-8")
-
-    def fake_merge_videos(source_video, dubbed_audio, subtitles_file, output_path, variant="full") -> None:
-        calls.append((
-            "ffmpeg",
-            Path(source_video).read_bytes(),
-            Path(subtitles_file).read_text(encoding="utf-8"),
-            variant,
-        ))
-        Path(output_path).write_bytes(b"fake subtitled mp4")
-
-    monkeypatch.setattr("api.TTSProvider", lambda voice: object())
-    monkeypatch.setattr("api.WhisperProvider", lambda model_name: object())
-    monkeypatch.setattr("api.VoiceoverService", FakeVoiceoverService)
-    monkeypatch.setattr("api.SubtitleService", FakeSubtitleService)
-    monkeypatch.setattr("api.FFmpegProvider.merge_videos", fake_merge_videos)
-
-    async def run_test() -> None:
-        response = await render(
-            video=FakeUpload(b"fake video"),
-            text="Test napisow w filmie",
-            variant="subtitled",
-        )
-
-        try:
-            assert response.status_code == 200
-            assert response.media_type == "video/mp4"
-            assert Path(response.path).read_bytes() == b"fake subtitled mp4"
-        finally:
-            await response.background()
-
-    asyncio.run(run_test())
+    assert (status_code, media_type, body) == (200, "video/mp4", b"fake subtitled mp4")
     assert calls == [
-        ("voiceover", "Test napisow w filmie", b"fake video"),
-        ("subtitles", b"fake mp3", "pl"),
-        ("ffmpeg", b"fake video", "fake srt", "subtitles_only"),
+        ("voiceover", "Test napisow w filmie", FAKE_VIDEO),
+        ("subtitles", FAKE_AUDIO, "pl"),
+        ("ffmpeg", FAKE_VIDEO, FAKE_AUDIO, FAKE_SRT, "subtitles_only"),
     ]
 
 
 def test_render_full_returns_mp4(monkeypatch) -> None:
     calls = []
+    patch_pipeline(monkeypatch, calls, subtitles=True, ffmpeg_output=b"fake full mp4")
 
-    class FakeVoiceoverService:
-        def __init__(self, tts_provider) -> None:
-            self.tts_provider = tts_provider
+    status_code, media_type, body = run_render("full", text="Test pelnego filmu")
 
-        async def create_and_adjust_voiceover(self, text, source_video_path, output_audio_path) -> None:
-            calls.append(("voiceover", text, Path(source_video_path).read_bytes()))
-            Path(output_audio_path).write_bytes(b"fake mp3")
-
-    class FakeSubtitleService:
-        def __init__(self, whisper_provider) -> None:
-            self.whisper_provider = whisper_provider
-
-        def generate_srt_from_audio(self, audio_path, output_srt_path, language="pl") -> None:
-            calls.append(("subtitles", Path(audio_path).read_bytes(), language))
-            Path(output_srt_path).write_text("fake srt", encoding="utf-8")
-
-    def fake_merge_videos(source_video, dubbed_audio, subtitles_file, output_path, variant="full") -> None:
-        calls.append((
-            "ffmpeg",
-            Path(source_video).read_bytes(),
-            Path(dubbed_audio).read_bytes(),
-            Path(subtitles_file).read_text(encoding="utf-8"),
-            variant,
-        ))
-        Path(output_path).write_bytes(b"fake full mp4")
-
-    monkeypatch.setattr("api.TTSProvider", lambda voice: object())
-    monkeypatch.setattr("api.WhisperProvider", lambda model_name: object())
-    monkeypatch.setattr("api.VoiceoverService", FakeVoiceoverService)
-    monkeypatch.setattr("api.SubtitleService", FakeSubtitleService)
-    monkeypatch.setattr("api.FFmpegProvider.merge_videos", fake_merge_videos)
-
-    async def run_test() -> None:
-        response = await render(
-            video=FakeUpload(b"fake video"),
-            text="Test pelnego filmu",
-            variant="full",
-        )
-
-        try:
-            assert response.status_code == 200
-            assert response.media_type == "video/mp4"
-            assert Path(response.path).read_bytes() == b"fake full mp4"
-        finally:
-            await response.background()
-
-    asyncio.run(run_test())
+    assert (status_code, media_type, body) == (200, "video/mp4", b"fake full mp4")
     assert calls == [
-        ("voiceover", "Test pelnego filmu", b"fake video"),
-        ("subtitles", b"fake mp3", "pl"),
-        ("ffmpeg", b"fake video", b"fake mp3", "fake srt", "full"),
+        ("voiceover", "Test pelnego filmu", FAKE_VIDEO),
+        ("subtitles", FAKE_AUDIO, "pl"),
+        ("ffmpeg", FAKE_VIDEO, FAKE_AUDIO, FAKE_SRT, "full"),
     ]
 
 
 def test_render_requires_text() -> None:
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(render(video=FakeUpload(b"fake video"), text="   ", variant="voiceover"))
+        asyncio.run(render(video=FakeUpload(FAKE_VIDEO), text="   ", variant="voiceover"))
 
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail == "text is required"
@@ -275,7 +167,7 @@ def test_render_requires_text() -> None:
 
 def test_render_rejects_unsupported_variant() -> None:
     with pytest.raises(HTTPException) as exc_info:
-        asyncio.run(render(video=FakeUpload(b"fake video"), text="Test", variant="bad"))
+        asyncio.run(render(video=FakeUpload(FAKE_VIDEO), text="Test", variant="bad"))
 
     assert exc_info.value.status_code == 400
     assert exc_info.value.detail == "unsupported variant: bad"

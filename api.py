@@ -1,5 +1,6 @@
 """Minimal HTTP API entry point for AutoLektor."""
 
+from dataclasses import dataclass
 from pathlib import Path
 import shutil
 import tempfile
@@ -18,13 +19,53 @@ from services.voiceover_service import VoiceoverService
 
 app = FastAPI(title="AutoLektor API")
 CHUNK_SIZE = 1024 * 1024
-SUPPORTED_VARIANTS = {"voiceover", "subtitles", "dubbed", "subtitled", "full"}
-SUBTITLE_VARIANTS = {"subtitles", "subtitled", "full"}
-VIDEO_VARIANTS = {"dubbed", "subtitled", "full"}
-FFMPEG_VARIANTS = {
-    "dubbed": "dubbed",
-    "subtitled": "subtitles_only",
-    "full": "full",
+
+
+@dataclass(frozen=True)
+class VariantSpec:
+    filename: str
+    media_type: str
+    needs_subtitles: bool = False
+    ffmpeg_variant: str | None = None
+
+
+@dataclass(frozen=True)
+class RenderWorkspace:
+    root: Path
+    source_video: Path
+    audio: Path
+    subtitles: Path
+
+    @classmethod
+    def create(cls) -> "RenderWorkspace":
+        root = Path(tempfile.mkdtemp(prefix="autolektor-"))
+        return cls(
+            root=root,
+            source_video=root / "source.mp4",
+            audio=root / "voiceover.mp3",
+            subtitles=root / "subtitles.srt",
+        )
+
+    def response_path(self, variant: VariantSpec) -> Path:
+        return self.root / variant.filename
+
+
+VARIANTS = {
+    "voiceover": VariantSpec(filename="voiceover.mp3", media_type="audio/mpeg"),
+    "subtitles": VariantSpec(filename="subtitles.srt", media_type="application/x-subrip", needs_subtitles=True),
+    "dubbed": VariantSpec(filename="dubbed.mp4", media_type="video/mp4", ffmpeg_variant="dubbed"),
+    "subtitled": VariantSpec(
+        filename="subtitled.mp4",
+        media_type="video/mp4",
+        needs_subtitles=True,
+        ffmpeg_variant="subtitles_only",
+    ),
+    "full": VariantSpec(
+        filename="full.mp4",
+        media_type="video/mp4",
+        needs_subtitles=True,
+        ffmpeg_variant="full",
+    ),
 }
 
 
@@ -44,6 +85,45 @@ async def cleanup_work_dir(work_dir: Path) -> None:
     shutil.rmtree(work_dir, ignore_errors=True)
 
 
+async def create_voiceover(text: str, workspace: RenderWorkspace) -> None:
+    voiceover_service = VoiceoverService(TTSProvider(voice=VOICE))
+    await voiceover_service.create_and_adjust_voiceover(
+        text=text,
+        source_video_path=str(workspace.source_video),
+        output_audio_path=str(workspace.audio),
+    )
+
+
+def create_subtitles(workspace: RenderWorkspace) -> None:
+    subtitle_service = SubtitleService(WhisperProvider(model_name=WHISPER_MODEL))
+    subtitle_service.generate_srt_from_audio(
+        audio_path=str(workspace.audio),
+        output_srt_path=str(workspace.subtitles),
+        language=TRANSCRIPTION_LANGUAGE,
+    )
+
+
+def create_video(workspace: RenderWorkspace, variant: VariantSpec) -> None:
+    if variant.ffmpeg_variant is None:
+        return
+    FFmpegProvider.merge_videos(
+        source_video=str(workspace.source_video),
+        dubbed_audio=str(workspace.audio),
+        subtitles_file=str(workspace.subtitles),
+        output_path=str(workspace.response_path(variant)),
+        variant=variant.ffmpeg_variant,
+    )
+
+
+def response_for_variant(workspace: RenderWorkspace, variant: VariantSpec) -> FileResponse:
+    return FileResponse(
+        workspace.response_path(variant),
+        media_type=variant.media_type,
+        filename=variant.filename,
+        background=BackgroundTask(cleanup_work_dir, workspace.root),
+    )
+
+
 @app.post("/render")
 async def render(
     video: Annotated[UploadFile, File()],
@@ -53,58 +133,20 @@ async def render(
     cleaned_text = text.strip()
     if not cleaned_text:
         raise HTTPException(status_code=400, detail="text is required")
-    if variant not in SUPPORTED_VARIANTS:
+    variant_spec = VARIANTS.get(variant)
+    if variant_spec is None:
         raise HTTPException(status_code=400, detail=f"unsupported variant: {variant}")
 
-    work_dir = Path(tempfile.mkdtemp(prefix="autolektor-"))
-    source_video = work_dir / "source.mp4"
-    output_audio = work_dir / "voiceover.mp3"
-    output_srt = work_dir / "subtitles.srt"
-    output_video = work_dir / f"{variant}.mp4"
+    workspace = RenderWorkspace.create()
 
     try:
-        await save_upload(video, source_video)
-        voiceover_service = VoiceoverService(TTSProvider(voice=VOICE))
-        await voiceover_service.create_and_adjust_voiceover(
-            text=cleaned_text,
-            source_video_path=str(source_video),
-            output_audio_path=str(output_audio),
-        )
-        if variant in SUBTITLE_VARIANTS:
-            subtitle_service = SubtitleService(WhisperProvider(model_name=WHISPER_MODEL))
-            subtitle_service.generate_srt_from_audio(
-                audio_path=str(output_audio),
-                output_srt_path=str(output_srt),
-                language=TRANSCRIPTION_LANGUAGE,
-            )
-        if variant in VIDEO_VARIANTS:
-            FFmpegProvider.merge_videos(
-                source_video=str(source_video),
-                dubbed_audio=str(output_audio),
-                subtitles_file=str(output_srt),
-                output_path=str(output_video),
-                variant=FFMPEG_VARIANTS[variant],
-            )
+        await save_upload(video, workspace.source_video)
+        await create_voiceover(cleaned_text, workspace)
+        if variant_spec.needs_subtitles:
+            create_subtitles(workspace)
+        create_video(workspace, variant_spec)
     except Exception:
-        shutil.rmtree(work_dir, ignore_errors=True)
+        shutil.rmtree(workspace.root, ignore_errors=True)
         raise
 
-    if variant == "subtitles":
-        response_path = output_srt
-        media_type = "application/x-subrip"
-        filename = "subtitles.srt"
-    elif variant in VIDEO_VARIANTS:
-        response_path = output_video
-        media_type = "video/mp4"
-        filename = f"{variant}.mp4"
-    else:
-        response_path = output_audio
-        media_type = "audio/mpeg"
-        filename = "voiceover.mp3"
-
-    return FileResponse(
-        response_path,
-        media_type=media_type,
-        filename=filename,
-        background=BackgroundTask(cleanup_work_dir, work_dir),
-    )
+    return response_for_variant(workspace, variant_spec)
