@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from pathlib import Path
 
 import pytest
-from fastapi import HTTPException
 
-from api import VARIANTS, app, health, render
+from api import VARIANTS, app, autolektor_error_handler, health, render
+from exceptions import (
+    EmptyTextError,
+    SubtitleGenerationError,
+    UnsupportedVariantError,
+    UploadSaveError,
+    VideoRenderError,
+    VoiceoverGenerationError,
+)
 
 FAKE_VIDEO = b"fake video"
 FAKE_AUDIO = b"fake mp3"
@@ -23,6 +31,11 @@ class FakeUpload:
             return b""
         self.was_read = True
         return self.content
+
+
+class FailingUpload:
+    async def read(self, size: int) -> bytes:
+        raise OSError("cannot read upload")
 
 
 def patch_pipeline(
@@ -93,6 +106,16 @@ def test_variant_contract() -> None:
     assert set(VARIANTS) == {"voiceover", "subtitles", "dubbed", "subtitled", "full"}
 
 
+def test_autolektor_error_handler_returns_n8n_friendly_json() -> None:
+    response = asyncio.run(autolektor_error_handler(None, UnsupportedVariantError("bad")))
+
+    assert response.status_code == 400
+    assert json.loads(response.body) == {
+        "error": "UNSUPPORTED_VARIANT",
+        "detail": "unsupported variant: bad",
+    }
+
+
 def test_render_voiceover_returns_mp3(monkeypatch) -> None:
     calls = []
     patch_pipeline(monkeypatch, calls)
@@ -158,16 +181,88 @@ def test_render_full_returns_mp4(monkeypatch) -> None:
 
 
 def test_render_requires_text() -> None:
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(EmptyTextError) as exc_info:
         asyncio.run(render(video=FakeUpload(FAKE_VIDEO), text="   ", variant="voiceover"))
 
-    assert exc_info.value.status_code == 400
-    assert exc_info.value.detail == "text is required"
+    assert exc_info.value.to_response() == {"error": "EMPTY_TEXT", "detail": "text is required"}
 
 
 def test_render_rejects_unsupported_variant() -> None:
-    with pytest.raises(HTTPException) as exc_info:
+    with pytest.raises(UnsupportedVariantError) as exc_info:
         asyncio.run(render(video=FakeUpload(FAKE_VIDEO), text="Test", variant="bad"))
 
-    assert exc_info.value.status_code == 400
-    assert exc_info.value.detail == "unsupported variant: bad"
+    assert exc_info.value.to_response() == {
+        "error": "UNSUPPORTED_VARIANT",
+        "detail": "unsupported variant: bad",
+    }
+
+
+def test_render_wraps_upload_failures() -> None:
+    with pytest.raises(UploadSaveError) as exc_info:
+        asyncio.run(render(video=FailingUpload(), text="Test", variant="voiceover"))
+
+    assert exc_info.value.to_response() == {
+        "error": "UPLOAD_SAVE_FAILED",
+        "detail": "failed to save uploaded video",
+    }
+
+
+def test_render_wraps_voiceover_failures(monkeypatch) -> None:
+    class FailingVoiceoverService:
+        def __init__(self, tts_provider) -> None:
+            self.tts_provider = tts_provider
+
+        async def create_and_adjust_voiceover(self, text, source_video_path, output_audio_path) -> None:
+            raise RuntimeError("tts exploded")
+
+    monkeypatch.setattr("api.TTSProvider", lambda voice: object())
+    monkeypatch.setattr("api.VoiceoverService", FailingVoiceoverService)
+
+    with pytest.raises(VoiceoverGenerationError) as exc_info:
+        asyncio.run(render(video=FakeUpload(FAKE_VIDEO), text="Test", variant="voiceover"))
+
+    assert exc_info.value.to_response() == {
+        "error": "VOICEOVER_GENERATION_FAILED",
+        "detail": "failed to generate voiceover",
+    }
+
+
+def test_render_wraps_subtitle_failures(monkeypatch) -> None:
+    calls = []
+    patch_pipeline(monkeypatch, calls)
+
+    class FailingSubtitleService:
+        def __init__(self, whisper_provider) -> None:
+            self.whisper_provider = whisper_provider
+
+        def generate_srt_from_audio(self, audio_path, output_srt_path, language="pl") -> None:
+            raise RuntimeError("whisper exploded")
+
+    monkeypatch.setattr("api.WhisperProvider", lambda model_name: object())
+    monkeypatch.setattr("api.SubtitleService", FailingSubtitleService)
+
+    with pytest.raises(SubtitleGenerationError) as exc_info:
+        asyncio.run(render(video=FakeUpload(FAKE_VIDEO), text="Test", variant="subtitles"))
+
+    assert exc_info.value.to_response() == {
+        "error": "SUBTITLE_GENERATION_FAILED",
+        "detail": "failed to generate subtitles",
+    }
+
+
+def test_render_wraps_video_failures(monkeypatch) -> None:
+    calls = []
+    patch_pipeline(monkeypatch, calls)
+
+    def fake_merge_videos(source_video, dubbed_audio, subtitles_file, output_path, variant="full") -> None:
+        raise RuntimeError("ffmpeg exploded")
+
+    monkeypatch.setattr("api.FFmpegProvider.merge_videos", fake_merge_videos)
+
+    with pytest.raises(VideoRenderError) as exc_info:
+        asyncio.run(render(video=FakeUpload(FAKE_VIDEO), text="Test", variant="dubbed"))
+
+    assert exc_info.value.to_response() == {
+        "error": "VIDEO_RENDER_FAILED",
+        "detail": "failed to render video",
+    }

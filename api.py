@@ -6,11 +6,20 @@ import shutil
 import tempfile
 from typing import Annotated
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, File, Form, Request, UploadFile
+from fastapi.responses import FileResponse, JSONResponse
 from starlette.background import BackgroundTask
 
 from config import TRANSCRIPTION_LANGUAGE, VOICE, WHISPER_MODEL
+from exceptions import (
+    AutoLektorError,
+    EmptyTextError,
+    SubtitleGenerationError,
+    UnsupportedVariantError,
+    UploadSaveError,
+    VideoRenderError,
+    VoiceoverGenerationError,
+)
 from providers.ffmpeg_provider import FFmpegProvider
 from providers.tts_provider import TTSProvider
 from providers.whisper_provider import WhisperProvider
@@ -69,6 +78,11 @@ VARIANTS = {
 }
 
 
+@app.exception_handler(AutoLektorError)
+async def autolektor_error_handler(_request: Request, exc: AutoLektorError) -> JSONResponse:
+    return JSONResponse(status_code=exc.status_code, content=exc.to_response())
+
+
 @app.get("/health")
 def health() -> dict[str, str]:
     """Return a simple readiness signal for n8n and local checks."""
@@ -76,9 +90,12 @@ def health() -> dict[str, str]:
 
 
 async def save_upload(upload: UploadFile, destination: Path) -> None:
-    with destination.open("wb") as output_file:
-        while chunk := await upload.read(CHUNK_SIZE):
-            output_file.write(chunk)
+    try:
+        with destination.open("wb") as output_file:
+            while chunk := await upload.read(CHUNK_SIZE):
+                output_file.write(chunk)
+    except Exception as exc:
+        raise UploadSaveError() from exc
 
 
 async def cleanup_work_dir(work_dir: Path) -> None:
@@ -86,33 +103,42 @@ async def cleanup_work_dir(work_dir: Path) -> None:
 
 
 async def create_voiceover(text: str, workspace: RenderWorkspace) -> None:
-    voiceover_service = VoiceoverService(TTSProvider(voice=VOICE))
-    await voiceover_service.create_and_adjust_voiceover(
-        text=text,
-        source_video_path=str(workspace.source_video),
-        output_audio_path=str(workspace.audio),
-    )
+    try:
+        voiceover_service = VoiceoverService(TTSProvider(voice=VOICE))
+        await voiceover_service.create_and_adjust_voiceover(
+            text=text,
+            source_video_path=str(workspace.source_video),
+            output_audio_path=str(workspace.audio),
+        )
+    except Exception as exc:
+        raise VoiceoverGenerationError() from exc
 
 
 def create_subtitles(workspace: RenderWorkspace) -> None:
-    subtitle_service = SubtitleService(WhisperProvider(model_name=WHISPER_MODEL))
-    subtitle_service.generate_srt_from_audio(
-        audio_path=str(workspace.audio),
-        output_srt_path=str(workspace.subtitles),
-        language=TRANSCRIPTION_LANGUAGE,
-    )
+    try:
+        subtitle_service = SubtitleService(WhisperProvider(model_name=WHISPER_MODEL))
+        subtitle_service.generate_srt_from_audio(
+            audio_path=str(workspace.audio),
+            output_srt_path=str(workspace.subtitles),
+            language=TRANSCRIPTION_LANGUAGE,
+        )
+    except Exception as exc:
+        raise SubtitleGenerationError() from exc
 
 
 def create_video(workspace: RenderWorkspace, variant: VariantSpec) -> None:
     if variant.ffmpeg_variant is None:
         return
-    FFmpegProvider.merge_videos(
-        source_video=str(workspace.source_video),
-        dubbed_audio=str(workspace.audio),
-        subtitles_file=str(workspace.subtitles),
-        output_path=str(workspace.response_path(variant)),
-        variant=variant.ffmpeg_variant,
-    )
+    try:
+        FFmpegProvider.merge_videos(
+            source_video=str(workspace.source_video),
+            dubbed_audio=str(workspace.audio),
+            subtitles_file=str(workspace.subtitles),
+            output_path=str(workspace.response_path(variant)),
+            variant=variant.ffmpeg_variant,
+        )
+    except Exception as exc:
+        raise VideoRenderError() from exc
 
 
 def response_for_variant(workspace: RenderWorkspace, variant: VariantSpec) -> FileResponse:
@@ -132,10 +158,10 @@ async def render(
 ) -> FileResponse:
     cleaned_text = text.strip()
     if not cleaned_text:
-        raise HTTPException(status_code=400, detail="text is required")
+        raise EmptyTextError()
     variant_spec = VARIANTS.get(variant)
     if variant_spec is None:
-        raise HTTPException(status_code=400, detail=f"unsupported variant: {variant}")
+        raise UnsupportedVariantError(variant)
 
     workspace = RenderWorkspace.create()
 
