@@ -6,10 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from api import VARIANTS, app, autolektor_error_handler, health, render
+from api import VARIANTS, app, autolektor_error_handler, health, render, validate_saved_video_file
 from exceptions import (
     EmptyVideoError,
     EmptyTextError,
+    InvalidVideoFileError,
     SubtitleGenerationError,
     TextFileReadError,
     TextInputConflictError,
@@ -92,6 +93,7 @@ def patch_pipeline(
         return Path(output_path)
 
     monkeypatch.setattr("api.render_variant", fake_render_variant)
+    monkeypatch.setattr("api.validate_saved_video_file", lambda path: None)
 
 
 def run_render(
@@ -318,6 +320,45 @@ def test_render_rejects_video_over_size_limit(monkeypatch) -> None:
     )
 
 
+def test_validate_saved_video_file_wraps_ffprobe_failures(monkeypatch, tmp_path: Path) -> None:
+    video_path = tmp_path / "input.mp4"
+    video_path.write_bytes(FAKE_VIDEO)
+
+    def failing_detect_video_fps(path: str) -> str:
+        raise RuntimeError("ffprobe failed")
+
+    monkeypatch.setattr("api.FFmpegProvider.detect_video_fps", failing_detect_video_fps)
+
+    with pytest.raises(InvalidVideoFileError) as exc_info:
+        validate_saved_video_file(video_path)
+
+    assert exc_info.value.to_response() == error_response(
+        "INVALID_VIDEO_FILE",
+        "invalid video file: expected a readable video stream",
+        "input",
+    )
+
+
+def test_render_rejects_invalid_saved_video(monkeypatch) -> None:
+    async def fake_render_variant(**kwargs) -> None:
+        raise AssertionError("render_variant should not run for invalid video")
+
+    def failing_validate_saved_video_file(path: Path) -> None:
+        raise InvalidVideoFileError()
+
+    monkeypatch.setattr("api.render_variant", fake_render_variant)
+    monkeypatch.setattr("api.validate_saved_video_file", failing_validate_saved_video_file)
+
+    with pytest.raises(InvalidVideoFileError) as exc_info:
+        asyncio.run(render(video=FakeUpload(FAKE_VIDEO), text="Test", variant="voiceover"))
+
+    assert exc_info.value.to_response() == error_response(
+        "INVALID_VIDEO_FILE",
+        "invalid video file: expected a readable video stream",
+        "input",
+    )
+
+
 def test_render_wraps_upload_failures() -> None:
     with pytest.raises(UploadSaveError) as exc_info:
         asyncio.run(render(video=FailingUpload(), text="Test", variant="voiceover"))
@@ -335,6 +376,7 @@ def test_render_wraps_voiceover_failures(monkeypatch) -> None:
         raise VoiceoverGenerationError()
 
     monkeypatch.setattr("api.render_variant", failing_render_variant)
+    monkeypatch.setattr("api.validate_saved_video_file", lambda path: None)
 
     with pytest.raises(VoiceoverGenerationError) as exc_info:
         asyncio.run(render(video=FakeUpload(FAKE_VIDEO), text="Test", variant="voiceover"))
@@ -352,6 +394,7 @@ def test_render_wraps_subtitle_failures(monkeypatch) -> None:
         raise SubtitleGenerationError()
 
     monkeypatch.setattr("api.render_variant", failing_render_variant)
+    monkeypatch.setattr("api.validate_saved_video_file", lambda path: None)
 
     with pytest.raises(SubtitleGenerationError) as exc_info:
         asyncio.run(render(video=FakeUpload(FAKE_VIDEO), text="Test", variant="subtitles"))
@@ -369,6 +412,7 @@ def test_render_wraps_video_failures(monkeypatch) -> None:
         raise VideoRenderError()
 
     monkeypatch.setattr("api.render_variant", failing_render_variant)
+    monkeypatch.setattr("api.validate_saved_video_file", lambda path: None)
 
     with pytest.raises(VideoRenderError) as exc_info:
         asyncio.run(render(video=FakeUpload(FAKE_VIDEO), text="Test", variant="dubbed"))

@@ -14,6 +14,7 @@ from exceptions import (
     AutoLektorError,
     EmptyVideoError,
     EmptyTextError,
+    InvalidVideoFileError,
     TextFileReadError,
     TextInputConflictError,
     UnsupportedVideoTypeError,
@@ -21,6 +22,7 @@ from exceptions import (
     VideoTooLargeError,
 )
 from pipeline import VARIANTS, VariantSpec, get_variant, render_variant
+from providers.ffmpeg_provider import FFmpegProvider
 
 app = FastAPI(title="AutoLektor API")
 CHUNK_SIZE = 1024 * 1024
@@ -64,6 +66,13 @@ def validate_video_upload(upload: UploadFile) -> None:
 
     if suffix not in SUPPORTED_VIDEO_SUFFIXES and content_type not in SUPPORTED_VIDEO_CONTENT_TYPES:
         raise UnsupportedVideoTypeError()
+
+
+def validate_saved_video_file(video_path: Path) -> None:
+    try:
+        FFmpegProvider.detect_video_fps(str(video_path))
+    except Exception as exc:
+        raise InvalidVideoFileError() from exc
 
 
 async def save_upload(upload: UploadFile, destination: Path) -> None:
@@ -137,6 +146,7 @@ async def render(
 
     try:
         await save_upload(video, workspace.source_video)
+        validate_saved_video_file(workspace.source_video)
         await render_variant(
             text=cleaned_text,
             source_video=workspace.source_video,

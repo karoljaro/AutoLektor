@@ -48,6 +48,7 @@ Responsibilities:
 - validate text input rules
 - validate basic video upload constraints
 - save upload into a temporary workspace
+- validate the saved file has a readable video stream through `ffprobe`
 - call `pipeline.render_variant(...)`
 - return the generated file as `FileResponse`
 - clean the temporary workspace after response or error

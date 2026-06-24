@@ -142,6 +142,7 @@ Text rule: provide exactly one of `text` or `text_file`.
 Video upload rules:
 
 - expected MP4 by `.mp4` suffix or `video/mp4` content type
+- saved video must contain a readable video stream according to `ffprobe`
 - empty uploads are rejected
 - upload size limit is `500 MiB`
 

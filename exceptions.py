@@ -78,6 +78,15 @@ class UnsupportedVideoTypeError(AutoLektorError):
         super().__init__("unsupported video type: expected MP4 video")
 
 
+class InvalidVideoFileError(AutoLektorError):
+    error_name = "INVALID_VIDEO_FILE"
+    status_code = HTTPStatus.BAD_REQUEST
+    stage = "input"
+
+    def __init__(self) -> None:
+        super().__init__("invalid video file: expected a readable video stream")
+
+
 class VideoTooLargeError(AutoLektorError):
     error_name = "VIDEO_TOO_LARGE"
     status_code = HTTPStatus.REQUEST_ENTITY_TOO_LARGE
