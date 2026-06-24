@@ -313,12 +313,22 @@ The full check can download/load Whisper models and is slower.
 
 Runtime contents:
 
-- Python 3.14 slim base image
+- Python 3.14 slim trixie runtime image
+- virtualenv copied from a builder stage
 - system `ffmpeg` and `ffprobe`
-- Python dependencies from `requirements.txt`
+- CPU or CUDA PyTorch selected by `TORCH_FLAVOR`
+- Python dependencies from `requirements.txt`, without test-only packages
 - project source code
-- default command: `uvicorn api:app --host 0.0.0.0 --port 8000`
+- non-root runtime user `autolektor` with writable cache directories
+- default command: `python -m uvicorn api:app --host 0.0.0.0 --port 8000 --workers 1`
+
+Build variants:
+
+- `TORCH_FLAVOR=cpu` is the default and avoids `nvidia-*`, `cuda-*` and `triton` packages.
+- `TORCH_FLAVOR=cu130` installs the CUDA 13.0 PyTorch build for GPU runtime.
 
 This image is intended to be pulled or referenced from a separate n8n deployment/repository.
 
 Runtime configuration should be passed with environment variables such as `AUTOLEKTOR_VOICE`, `AUTOLEKTOR_TRANSCRIPTION_LANGUAGE` and `AUTOLEKTOR_WHISPER_MODEL`.
+
+Whisper model cache should be mounted at `/home/autolektor/.cache/whisper` for repeated runs.

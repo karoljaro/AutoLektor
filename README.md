@@ -175,26 +175,43 @@ Run all variants, including Whisper-based variants:
 
 ## Docker API Image
 
-Build the API image:
+More build and run examples are in [DOCKER_COMMANDS.md](DOCKER_COMMANDS.md).
+
+Build the CPU API image:
 
 ```bash
-docker build -t autolektor-api .
+docker build -t autolektor-api:cpu .
 ```
 
-Run the API container:
+Build the NVIDIA CUDA 13.0 API image:
 
 ```bash
-docker run --rm -p 8000:8000 autolektor-api
+docker build --build-arg TORCH_FLAVOR=cu130 -t autolektor-api:gpu .
 ```
 
-Run with configuration overrides:
+With Podman, use Docker image format if you want to keep the image healthcheck:
+
+```bash
+podman build --format docker -t autolektor-api:cpu .
+podman build --format docker --build-arg TORCH_FLAVOR=cu130 -t autolektor-api:gpu .
+```
+
+Run the CPU API container:
 
 ```bash
 docker run --rm -p 8000:8000 \
-  -e AUTOLEKTOR_VOICE=en-US-AvaNeural \
-  -e AUTOLEKTOR_TRANSCRIPTION_LANGUAGE=en \
   -e AUTOLEKTOR_WHISPER_MODEL=small \
-  autolektor-api
+  -v autolektor-whisper:/home/autolektor/.cache/whisper \
+  autolektor-api:cpu
+```
+
+Run the GPU API container:
+
+```bash
+docker run --rm --gpus all -p 8000:8000 \
+  -e AUTOLEKTOR_WHISPER_MODEL=large-v3 \
+  -v autolektor-whisper:/home/autolektor/.cache/whisper \
+  autolektor-api:gpu
 ```
 
 Then call:
@@ -203,7 +220,7 @@ Then call:
 curl http://127.0.0.1:8000/health
 ```
 
-The image installs `ffmpeg` and `ffprobe` inside the container. n8n integration can use this API image from a separate repository or deployment.
+The image installs `ffmpeg` and `ffprobe` inside the container. The CPU build avoids CUDA packages; the GPU build installs the selected CUDA PyTorch wheel. The GPU image still requires NVIDIA driver support on the host and a container runtime configured to expose the GPU, for example Docker with NVIDIA Container Toolkit or an equivalent Podman/NVIDIA CDI setup. With Podman, add `:U` to the Whisper volume mount if the non-root container user needs ownership remapping. n8n integration can use this API image from a separate repository or deployment.
 
 ## Tests
 
