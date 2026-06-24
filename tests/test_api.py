@@ -8,11 +8,13 @@ import pytest
 
 from api import VARIANTS, app, autolektor_error_handler, health, render
 from exceptions import (
+    EmptyVideoError,
     EmptyTextError,
     SubtitleGenerationError,
     TextFileReadError,
     TextInputConflictError,
     UnsupportedVariantError,
+    UnsupportedVideoTypeError,
     UploadSaveError,
     VideoRenderError,
     VoiceoverGenerationError,
@@ -24,8 +26,10 @@ FAKE_SRT = "fake srt"
 
 
 class FakeUpload:
-    def __init__(self, content: bytes) -> None:
+    def __init__(self, content: bytes, filename: str = "input.mp4", content_type: str = "video/mp4") -> None:
         self.content = content
+        self.filename = filename
+        self.content_type = content_type
         self.was_read = False
 
     async def read(self, size: int | None = None) -> bytes:
@@ -36,6 +40,9 @@ class FakeUpload:
 
 
 class FailingUpload:
+    filename = "input.mp4"
+    content_type = "video/mp4"
+
     async def read(self, size: int | None = None) -> bytes:
         raise OSError("cannot read upload")
 
@@ -303,6 +310,30 @@ def test_render_rejects_unsupported_variant() -> None:
         asyncio.run(render(video=FakeUpload(FAKE_VIDEO), text="Test", variant="bad"))
 
     assert exc_info.value.to_response() == error_response("UNSUPPORTED_VARIANT", "unsupported variant: bad", "input")
+
+
+def test_render_rejects_unsupported_video_type() -> None:
+    with pytest.raises(UnsupportedVideoTypeError) as exc_info:
+        asyncio.run(
+            render(
+                video=FakeUpload(FAKE_VIDEO, filename="input.txt", content_type="text/plain"),
+                text="Test",
+                variant="voiceover",
+            )
+        )
+
+    assert exc_info.value.to_response() == error_response(
+        "UNSUPPORTED_VIDEO_TYPE",
+        "unsupported video type: expected MP4 video",
+        "input",
+    )
+
+
+def test_render_rejects_empty_video() -> None:
+    with pytest.raises(EmptyVideoError) as exc_info:
+        asyncio.run(render(video=FakeUpload(b""), text="Test", variant="voiceover"))
+
+    assert exc_info.value.to_response() == error_response("EMPTY_VIDEO", "video file is empty", "input")
 
 
 def test_render_wraps_upload_failures() -> None:

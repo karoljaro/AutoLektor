@@ -13,11 +13,13 @@ from starlette.background import BackgroundTask
 from config import TRANSCRIPTION_LANGUAGE, VOICE, WHISPER_MODEL
 from exceptions import (
     AutoLektorError,
+    EmptyVideoError,
     EmptyTextError,
     SubtitleGenerationError,
     TextFileReadError,
     TextInputConflictError,
     UnsupportedVariantError,
+    UnsupportedVideoTypeError,
     UploadSaveError,
     VideoRenderError,
     VoiceoverGenerationError,
@@ -30,6 +32,8 @@ from services.voiceover_service import VoiceoverService
 
 app = FastAPI(title="AutoLektor API")
 CHUNK_SIZE = 1024 * 1024
+SUPPORTED_VIDEO_CONTENT_TYPES = {"video/mp4"}
+SUPPORTED_VIDEO_SUFFIXES = {".mp4"}
 
 
 @dataclass(frozen=True)
@@ -91,13 +95,27 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+def validate_video_upload(upload: UploadFile) -> None:
+    filename = getattr(upload, "filename", "") or ""
+    suffix = Path(filename).suffix.lower()
+    content_type = (getattr(upload, "content_type", "") or "").split(";")[0].strip().lower()
+
+    if suffix not in SUPPORTED_VIDEO_SUFFIXES and content_type not in SUPPORTED_VIDEO_CONTENT_TYPES:
+        raise UnsupportedVideoTypeError()
+
+
 async def save_upload(upload: UploadFile, destination: Path) -> None:
+    bytes_written = 0
     try:
         with destination.open("wb") as output_file:
             while chunk := await upload.read(CHUNK_SIZE):
                 output_file.write(chunk)
+                bytes_written += len(chunk)
     except Exception as exc:
         raise UploadSaveError() from exc
+
+    if bytes_written == 0:
+        raise EmptyVideoError()
 
 
 async def cleanup_work_dir(work_dir: Path) -> None:
@@ -197,6 +215,7 @@ async def render(
     variant_spec = VARIANTS.get(variant)
     if variant_spec is None:
         raise UnsupportedVariantError(variant)
+    validate_video_upload(video)
 
     workspace = RenderWorkspace.create()
 

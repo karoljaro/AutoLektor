@@ -60,6 +60,24 @@ class TextFileReadError(AutoLektorError):
         super().__init__("failed to read text_file as UTF-8 text")
 
 
+class EmptyVideoError(AutoLektorError):
+    error_name = "EMPTY_VIDEO"
+    status_code = HTTPStatus.BAD_REQUEST
+    stage = "input"
+
+    def __init__(self) -> None:
+        super().__init__("video file is empty")
+
+
+class UnsupportedVideoTypeError(AutoLektorError):
+    error_name = "UNSUPPORTED_VIDEO_TYPE"
+    status_code = HTTPStatus.BAD_REQUEST
+    stage = "input"
+
+    def __init__(self) -> None:
+        super().__init__("unsupported video type: expected MP4 video")
+
+
 class UploadSaveError(AutoLektorError):
     error_name = "UPLOAD_SAVE_FAILED"
     stage = "upload"
