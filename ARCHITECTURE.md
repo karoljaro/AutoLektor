@@ -23,6 +23,8 @@ AutoLektor/
 ├── services/               # Voiceover/subtitle business services
 ├── scripts/                # Smoke-test helpers
 ├── tests/                  # Automated tests
+├── Dockerfile              # API container image
+├── .dockerignore           # Docker build context exclusions
 └── example/                # Ignored local sample files
 ```
 
@@ -300,3 +302,17 @@ Full variant check:
 ```
 
 The full check can download/load Whisper models and is slower.
+
+## Docker Runtime
+
+`Dockerfile` builds the AutoLektor API image only. It does not include n8n.
+
+Runtime contents:
+
+- Python 3.14 slim base image
+- system `ffmpeg` and `ffprobe`
+- Python dependencies from `requirements.txt`
+- project source code
+- default command: `uvicorn api:app --host 0.0.0.0 --port 8000`
+
+This image is intended to be pulled or referenced from a separate n8n deployment/repository.

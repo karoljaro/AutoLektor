@@ -171,6 +171,28 @@ Run all variants, including Whisper-based variants:
 .venv/bin/python scripts/smoke_http.py --include-whisper --all-variants
 ```
 
+## Docker API Image
+
+Build the API image:
+
+```bash
+docker build -t autolektor-api .
+```
+
+Run the API container:
+
+```bash
+docker run --rm -p 8000:8000 autolektor-api
+```
+
+Then call:
+
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+The image installs `ffmpeg` and `ffprobe` inside the container. n8n integration can use this API image from a separate repository or deployment.
+
 ## Tests
 
 Run the unit test suite:
