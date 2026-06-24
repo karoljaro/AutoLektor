@@ -2,7 +2,8 @@
 
 Generates a tiny test MP4, starts Uvicorn, calls the API through real HTTP,
 and verifies returned media files. By default it checks the lightweight
-variants that avoid Whisper downloads/inference.
+variants that avoid Whisper downloads/inference. Use --all-variants with
+--include-whisper to check the full endpoint contract.
 """
 
 from __future__ import annotations
@@ -193,12 +194,16 @@ def selected_variants(names: list[str], include_whisper: bool) -> list[VariantCh
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run HTTP smoke tests against the AutoLektor API.")
     parser.add_argument("--variant", action="append", choices=sorted(VARIANTS), help="Variant to test. Can be repeated.")
+    parser.add_argument("--all-variants", action="store_true", help="Run every variant. Requires --include-whisper.")
     parser.add_argument("--include-whisper", action="store_true", help="Allow variants that run Whisper.")
     parser.add_argument("--duration", type=int, default=3, help="Generated test video duration in seconds.")
     parser.add_argument("--work-dir", type=Path, default=None, help="Directory for generated smoke-test files.")
     args = parser.parse_args()
 
-    variant_names = args.variant or ["voiceover", "dubbed"]
+    if args.all_variants and args.variant:
+        parser.error("--all-variants cannot be combined with --variant")
+
+    variant_names = list(VARIANTS) if args.all_variants else args.variant or ["voiceover", "dubbed"]
     checks = selected_variants(variant_names, args.include_whisper)
 
     work_dir = args.work_dir or Path(tempfile.mkdtemp(prefix="autolektor-smoke-"))
