@@ -1,151 +1,307 @@
-# Video Automation Project - Architecture
+# AutoLektor Architecture
+
+AutoLektor has two entry points and one shared render pipeline:
+
+- `api.py`: FastAPI adapter for n8n and HTTP integrations
+- `main.py`: simple `argparse` CLI adapter
+- `pipeline.py`: shared variant contract and rendering orchestration
+
+The adapters are responsible for input/output concerns. The pipeline is responsible for deciding which media steps are needed for a selected variant.
 
 ## Project Structure
 
-```
+```text
 AutoLektor/
-├── main.py                      # Orchestration entry point
-├── config.py                    # Centralized configuration
-├── helpers/                     # Helper utilities
-│   ├── __init__.py             # File operations (read_text_from_file)
-│   ├── time_helpers.py         # Time formatting (format_time)
-│   └── duration_helpers.py     # Media duration (get_duration)
-├── providers/                   # External library wrappers
-│   ├── __init__.py             # TTS Provider (edge-tts wrapper)
-│   ├── whisper_provider.py     # Speech-to-text (Whisper wrapper)
-│   └── ffmpeg_provider.py      # Video operations (FFmpeg wrapper)
-├── services/                    # Business logic layer
-│   ├── __init__.py             # Voiceover Service
-│   ├── subtitle_service.py     # Subtitle generation logic
-│   └── video_service.py        # Video rendering logic
-└── Video/                       # Working directory
-    ├── tekst.txt               # Input text
-    ├── lektor_pl.mp3           # Generated audio
-    └── lektor_pl.srt           # Generated subtitles
+├── api.py                  # FastAPI app, upload handling and HTTP responses
+├── main.py                 # CLI parser, path normalization and exit codes
+├── pipeline.py             # Shared render pipeline and variant definitions
+├── config.py               # Project defaults only
+├── exceptions.py           # Domain errors exposed by the API
+├── logger.py               # Logging setup
+├── helpers/                # File, duration, time and preflight helpers
+├── providers/              # External tool/library wrappers
+├── services/               # Voiceover/subtitle business services
+├── scripts/                # Smoke-test helpers
+├── tests/                  # Automated tests
+└── example/                # Ignored local sample files
 ```
 
-## Architecture Layers
+## Entry Points
 
-### 1. **Config Layer** (`config.py`)
+### API Adapter: `api.py`
 
-- Centralized configuration management
-- All constants and settings in one place
-- Easy to maintain and modify
+The API exposes:
 
-### 2. **Helper Layer** (`helpers/`)
+- `GET /health`
+- `POST /render`
 
-- **file_helpers.py**: Text file operations
-- **time_helpers.py**: SRT time format conversion
-- **duration_helpers.py**: Media file duration measurement
+`POST /render` accepts `multipart/form-data`:
 
-### 3. **Provider Layer** (`providers/`)
+- `video`: uploaded MP4 video
+- `text` or `text_file`: exactly one text input
+- `variant`: render variant
+- `voice`: optional `edge-tts` voice override
+- `language`: optional Whisper language override
 
-Wraps external libraries with clear interfaces:
+Responsibilities:
 
-- **TTSProvider**: Edge-TTS text-to-speech
-- **WhisperProvider**: OpenAI Whisper speech-to-text
-- **FFmpegProvider**: FFmpeg video operations
+- validate text input rules
+- validate basic video upload constraints
+- save upload into a temporary workspace
+- call `pipeline.render_variant(...)`
+- return the generated file as `FileResponse`
+- clean the temporary workspace after response or error
+- expose expected failures as stable JSON errors for n8n
 
-### 4. **Service Layer** (`services/`)
+The API does not own rendering logic. It delegates rendering to `pipeline.py`.
 
-Orchestrates business logic:
+### CLI Adapter: `main.py`
 
-- **VoiceoverService**: Generates and auto-adjusts voiceover speed
-- **SubtitleService**: Generates SRT subtitles from audio
-- **VideoService**: Renders 3 video variants
+The CLI uses standard-library `argparse`.
 
-### 5. **Main Layer** (`main.py`)
+Required inputs:
 
-- Initializes all services and providers
-- Orchestrates the workflow
-- Minimal business logic
+- source `video` path
+- exactly one of `--text` or `--text-file`
+- `--variant`
+
+Optional inputs:
+
+- `-o/--output`
+- `--voice`
+- `--language`
+
+Responsibilities:
+
+- parse terminal arguments
+- resolve relative paths from the current working directory
+- calculate default output paths as `<input_stem>_<variant>.<ext>`
+- run local preflight checks for `ffmpeg`, `ffprobe`, source video and text file
+- call `pipeline.render_variant(...)`
+- return exit code `0` on success and `1` on runtime failure
+
+The CLI can be exposed through `PATH` with a wrapper or executable script. Relative paths still resolve from the directory where the command is started.
+
+## Shared Pipeline
+
+`pipeline.py` defines the variant contract:
+
+| Variant | Output | Internal steps |
+| --- | --- | --- |
+| `voiceover` | MP3 | voiceover |
+| `subtitles` | SRT | voiceover, subtitles |
+| `dubbed` | MP4 | voiceover, video render |
+| `subtitled` | MP4 | voiceover, subtitles, video render |
+| `full` | MP4 | voiceover, subtitles, video render |
+
+Core API:
+
+```python
+async def render_variant(
+    *,
+    text: str,
+    source_video: Path,
+    output_path: Path,
+    variant: str,
+    work_dir: Path,
+    voice: str | None = None,
+    language: str | None = None,
+) -> Path:
+    ...
+```
+
+Responsibilities:
+
+- trim and validate text
+- resolve the selected `VariantSpec`
+- create needed parent directories
+- create voiceover through `VoiceoverService`
+- create subtitles through `SubtitleService` when required
+- create MP4 output through `FFmpegProvider` when required
+- map provider/service failures to domain errors
+
+The caller owns workspace lifetime:
+
+- API keeps the workspace until `FileResponse` finishes
+- CLI uses `TemporaryDirectory`
+
+## Configuration
+
+`config.py` contains project defaults only:
+
+- `VOICE`
+- `WHISPER_MODEL`
+- `TRANSCRIPTION_LANGUAGE`
+- `NORMALIZE_WHITESPACE`
+- `VIDEO_CODEC`
+- `AUDIO_CODEC`
+
+Input video paths, input text paths and output paths are not configuration. They come from the API request or CLI arguments.
+
+FPS is not configured. For video variants with burned subtitles, `FFmpegProvider` reads the source video FPS through `ffprobe`.
+
+## Services
+
+### `VoiceoverService`
+
+Generates voiceover through a TTS provider and adjusts speech speed when the generated audio is longer than the source video.
+
+Inputs:
+
+- text
+- source video path
+- output audio path
+
+Dependencies:
+
+- `TTSProvider`
+- `helpers.duration_helpers.get_duration`
+
+### `SubtitleService`
+
+Generates SRT subtitles from generated voiceover audio.
+
+Inputs:
+
+- audio path
+- output SRT path
+- transcription language
+
+Dependencies:
+
+- `WhisperProvider`
+- `helpers.time_helpers.format_time`
+
+### `VideoService`
+
+Legacy helper for the old "create all variants" workflow. Current API and CLI use `pipeline.py` directly.
+
+Keep it until there is an explicit decision to remove it.
+
+## Providers
+
+Providers wrap external tools and libraries:
+
+- `TTSProvider`: `edge-tts`
+- `WhisperProvider`: OpenAI Whisper
+- `FFmpegProvider`: `ffmpeg` and `ffprobe`
+
+`FFmpegProvider` behavior:
+
+- `dubbed`: copies the source video stream and replaces audio
+- `subtitled`: burns subtitles into source video and keeps original audio
+- `full`: burns subtitles and replaces audio with generated voiceover
+- subtitle-burning variants detect FPS from the source file through `ffprobe`
+
+## Error Boundaries
+
+`exceptions.py` defines domain errors used by API responses and pipeline wrapping.
+
+Expected API error response shape:
+
+```json
+{
+  "error": "ERROR_NAME",
+  "detail": "human readable detail",
+  "stage": "input|upload|voiceover|subtitles|video_render",
+  "retryable": false
+}
+```
+
+Main stages:
+
+- `input`
+- `upload`
+- `voiceover`
+- `subtitles`
+- `video_render`
+
+The API hides low-level provider details from HTTP responses. The CLI currently logs runtime failures and exits with code `1`.
 
 ## Data Flow
 
-```
-Input Text File
+### API Flow
+
+```text
+HTTP multipart request
         ↓
-[STEP 0] read_text_from_file (helpers)
+api.resolve_text_input
         ↓
-[STEP 1] VoiceoverService → TTSProvider
-        ├─ Generate audio
-        ├─ Check duration
-        └─ Auto-adjust speed if needed
+api.validate_video_upload
         ↓
-[STEP 2] SubtitleService → WhisperProvider
-        ├─ Transcribe audio
-        └─ Generate SRT file
+api.save_upload into temp workspace
         ↓
-[STEP 3] VideoService → FFmpegProvider
-        ├─ Render Variant 1: Voiceover + Subtitles
-        ├─ Render Variant 2: Voiceover only
-        └─ Render Variant 3: Subtitles only
+pipeline.render_variant
         ↓
-Output: 3 Video Files
+FileResponse
+        ↓
+BackgroundTask cleanup
 ```
 
-## Design Patterns
+### CLI Flow
 
-### Dependency Injection
-
-Services receive providers as dependencies:
-
-```python
-voiceover_service = VoiceoverService(tts_provider)
-subtitle_service = SubtitleService(whisper_provider)
+```text
+Terminal arguments
+        ↓
+main.parse_args
+        ↓
+path normalization and preflight checks
+        ↓
+main.resolve_cli_text
+        ↓
+TemporaryDirectory workspace
+        ↓
+pipeline.render_variant
+        ↓
+output file path
 ```
 
-### Separation of Concerns
+### Pipeline Flow
 
-- Providers: Handle library-specific details
-- Services: Contain business logic
-- Helpers: Provide utility functions
-- Config: Manage all constants
-- Main: Orchestrate the workflow
+```text
+text + source video + variant
+        ↓
+VoiceoverService -> TTSProvider
+        ↓
+SubtitleService -> WhisperProvider       optional
+        ↓
+FFmpegProvider -> ffmpeg/ffprobe          optional
+        ↓
+selected output file
+```
 
-### Single Responsibility Principle
+## Tests
 
-Each class/module has one clear purpose:
+Test coverage is split by boundary:
 
-- `TTSProvider` → wraps TTS
-- `VoiceoverService` → manages voiceover generation and speed adjustment
-- `file_helpers` → file operations
+- `tests/test_api.py`: HTTP adapter contract, upload validation and domain errors
+- `tests/test_main.py`: CLI parser, path resolution and pipeline call
+- `tests/test_pipeline.py`: variant orchestration without real TTS/Whisper/FFmpeg
+- `tests/test_providers.py`: provider command construction and FPS detection
+- `tests/test_services.py`: service behavior
+- `tests/test_helpers.py`: helpers
+- `tests/test_preflight.py`: command/path preflight behavior
 
-## How to Extend
+Run:
 
-### Add a new provider:
+```bash
+.venv/bin/python -m pytest
+```
 
-1. Create `providers/new_provider.py`
-2. Define a class with clear methods
-3. Import and use in services
+## Smoke Tests
 
-### Add a new service:
+HTTP smoke tests live in `scripts/smoke_http.py`.
 
-1. Create `services/new_service.py`
-2. Use providers as dependencies
-3. Implement business logic
-4. Import in `main.py`
+Default lightweight check:
 
-### Add configuration:
+```bash
+.venv/bin/python scripts/smoke_http.py
+```
 
-1. Add constants to `config.py`
-2. Import where needed
+Full variant check:
 
-## Testing
+```bash
+.venv/bin/python scripts/smoke_http.py --include-whisper --all-variants
+```
 
-Each layer can be tested independently:
-
-- **Helpers**: Unit tests for utility functions
-- **Providers**: Mock external libraries
-- **Services**: Integration tests with providers
-- **Main**: End-to-end tests
-
-## Benefits of This Structure
-
-✓ **Maintainability**: Easy to find and modify code  
-✓ **Testability**: Each layer can be tested independently  
-✓ **Extensibility**: Easy to add new providers/services  
-✓ **Reusability**: Services can be reused in different contexts  
-✓ **Clarity**: Clear separation of concerns  
-✓ **Scalability**: Easy to add new features without breaking existing code
-
+The full check can download/load Whisper models and is slower.
