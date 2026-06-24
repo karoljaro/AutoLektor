@@ -37,13 +37,19 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return build_parser().parse_args(argv)
 
 
+def resolve_path(path: Path) -> Path:
+    return path.expanduser().resolve()
+
+
 def default_output_path(video_path: Path, variant: str) -> Path:
     suffix = Path(VARIANTS[variant].filename).suffix
     return video_path.with_name(f"{video_path.stem}_{variant}{suffix}")
 
 
 def resolve_output_path(video_path: Path, output_path: Path | None, variant: str) -> Path:
-    return (output_path or default_output_path(video_path, variant)).expanduser()
+    if output_path is not None:
+        return resolve_path(output_path)
+    return default_output_path(resolve_path(video_path), variant)
 
 
 def resolve_cli_text(text: str | None, text_file: Path | None) -> str:
@@ -69,12 +75,13 @@ def preflight_checks(video_path: Path, output_path: Path, text_file: Path | None
 
 
 async def run_cli(args: argparse.Namespace) -> int:
-    video_path = args.video.expanduser()
+    video_path = resolve_path(args.video)
+    text_file = resolve_path(args.text_file) if args.text_file is not None else None
     output_path = resolve_output_path(video_path, args.output, args.variant)
 
     try:
-        preflight_checks(video_path, output_path, args.text_file)
-        text = resolve_cli_text(args.text, args.text_file)
+        preflight_checks(video_path, output_path, text_file)
+        text = resolve_cli_text(args.text, text_file)
         with tempfile.TemporaryDirectory(prefix="autolektor-cli-") as temp_dir:
             await render_variant(
                 text=text,

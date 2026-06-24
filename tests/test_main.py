@@ -42,6 +42,13 @@ def test_default_output_path_uses_input_stem_variant_and_extension() -> None:
     assert main.default_output_path(Path("/tmp/input.mp4"), "full") == Path("/tmp/input_full.mp4")
 
 
+def test_resolve_output_path_uses_current_working_directory(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    assert main.resolve_output_path(Path("input.mp4"), None, "voiceover") == tmp_path / "input_voiceover.mp3"
+    assert main.resolve_output_path(Path("input.mp4"), Path("out.mp3"), "voiceover") == tmp_path / "out.mp3"
+
+
 def test_resolve_cli_text_accepts_inline_text() -> None:
     assert main.resolve_cli_text("  Hello world  ", None) == "Hello world"
 
@@ -83,8 +90,8 @@ def test_run_cli_calls_pipeline_with_expected_arguments(monkeypatch, tmp_path: P
 
     assert result == 0
     assert calls[0]["text"] == "Text from file"
-    assert calls[0]["source_video"] == video_path
-    assert calls[0]["output_path"] == output_path
+    assert calls[0]["source_video"] == video_path.resolve()
+    assert calls[0]["output_path"] == output_path.resolve()
     assert calls[0]["variant"] == "dubbed"
     assert calls[0]["voice"] == "en-US-AvaNeural"
     assert calls[0]["language"] is None
@@ -108,9 +115,45 @@ def test_run_cli_uses_default_output_path(monkeypatch, tmp_path: Path) -> None:
     result = asyncio.run(main.run_cli(args))
 
     assert result == 0
-    assert calls[0]["output_path"] == tmp_path / "input_voiceover.mp3"
+    assert calls[0]["output_path"] == (tmp_path / "input_voiceover.mp3").resolve()
     assert calls[0]["text"] == "Hello"
     assert calls[0]["language"] == "pl"
+
+
+def test_run_cli_resolves_relative_paths_from_current_working_directory(monkeypatch, tmp_path: Path) -> None:
+    calls = []
+    preflight_calls = []
+    work_dir = tmp_path / "work"
+    work_dir.mkdir()
+    (work_dir / "input.mp4").write_bytes(b"video")
+    (work_dir / "text.txt").write_text("Text from cwd", encoding="utf-8")
+    monkeypatch.chdir(work_dir)
+
+    def fake_preflight(video_path: Path, output_path: Path, text_file: Path | None = None) -> None:
+        preflight_calls.append((video_path, output_path, text_file))
+
+    async def fake_render_variant(**kwargs) -> Path:
+        calls.append(kwargs)
+        Path(kwargs["output_path"]).write_bytes(b"output")
+        return Path(kwargs["output_path"])
+
+    monkeypatch.setattr("main.preflight_checks", fake_preflight)
+    monkeypatch.setattr("main.render_variant", fake_render_variant)
+    args = main.parse_args(["input.mp4", "--text-file", "text.txt", "--variant", "voiceover"])
+
+    result = asyncio.run(main.run_cli(args))
+
+    assert result == 0
+    assert preflight_calls == [
+        (
+            (work_dir / "input.mp4").resolve(),
+            (work_dir / "input_voiceover.mp3").resolve(),
+            (work_dir / "text.txt").resolve(),
+        )
+    ]
+    assert calls[0]["source_video"] == (work_dir / "input.mp4").resolve()
+    assert calls[0]["output_path"] == (work_dir / "input_voiceover.mp3").resolve()
+    assert calls[0]["text"] == "Text from cwd"
 
 
 def test_run_cli_returns_1_for_empty_text(monkeypatch, tmp_path: Path) -> None:
