@@ -64,42 +64,34 @@ def patch_pipeline(
     subtitles: bool = False,
     ffmpeg_output: bytes | None = None,
 ) -> None:
-    class FakeVoiceoverService:
-        def __init__(self, tts_provider) -> None:
-            self.tts_provider = tts_provider
+    async def fake_render_variant(
+        *,
+        text,
+        source_video,
+        output_path,
+        variant,
+        work_dir,
+        voice=None,
+        language=None,
+    ) -> Path:
+        calls.append((
+            "render",
+            text,
+            Path(source_video).read_bytes(),
+            variant,
+            voice,
+            language,
+            Path(output_path).name,
+        ))
+        if variant == "voiceover":
+            Path(output_path).write_bytes(FAKE_AUDIO)
+        elif variant == "subtitles":
+            Path(output_path).write_text(FAKE_SRT, encoding="utf-8")
+        else:
+            Path(output_path).write_bytes(ffmpeg_output if ffmpeg_output is not None else b"fake mp4")
+        return Path(output_path)
 
-        async def create_and_adjust_voiceover(self, text, source_video_path, output_audio_path) -> None:
-            calls.append(("voiceover", text, Path(source_video_path).read_bytes()))
-            Path(output_audio_path).write_bytes(FAKE_AUDIO)
-
-    monkeypatch.setattr("api.TTSProvider", lambda voice: object())
-    monkeypatch.setattr("api.VoiceoverService", FakeVoiceoverService)
-
-    if subtitles:
-        class FakeSubtitleService:
-            def __init__(self, whisper_provider) -> None:
-                self.whisper_provider = whisper_provider
-
-            def generate_srt_from_audio(self, audio_path, output_srt_path, language="pl") -> None:
-                calls.append(("subtitles", Path(audio_path).read_bytes(), language))
-                Path(output_srt_path).write_text(FAKE_SRT, encoding="utf-8")
-
-        monkeypatch.setattr("api.WhisperProvider", lambda model_name: object())
-        monkeypatch.setattr("api.SubtitleService", FakeSubtitleService)
-
-    if ffmpeg_output is not None:
-        def fake_merge_videos(source_video, dubbed_audio, subtitles_file, output_path, variant="full") -> None:
-            subtitles_path = Path(subtitles_file)
-            calls.append((
-                "ffmpeg",
-                Path(source_video).read_bytes(),
-                Path(dubbed_audio).read_bytes(),
-                subtitles_path.read_text(encoding="utf-8") if subtitles_path.exists() else None,
-                variant,
-            ))
-            Path(output_path).write_bytes(ffmpeg_output)
-
-        monkeypatch.setattr("api.FFmpegProvider.merge_videos", fake_merge_videos)
+    monkeypatch.setattr("api.render_variant", fake_render_variant)
 
 
 def run_render(
@@ -154,7 +146,7 @@ def test_render_voiceover_returns_mp3(monkeypatch) -> None:
     status_code, media_type, body = run_render("voiceover", text="  Test lektora  ")
 
     assert (status_code, media_type, body) == (200, "audio/mpeg", FAKE_AUDIO)
-    assert calls == [("voiceover", "Test lektora", FAKE_VIDEO)]
+    assert calls == [("render", "Test lektora", FAKE_VIDEO, "voiceover", None, None, "voiceover.mp3")]
 
 
 def test_render_accepts_text_file(monkeypatch) -> None:
@@ -164,25 +156,17 @@ def test_render_accepts_text_file(monkeypatch) -> None:
     status_code, media_type, body = run_render("voiceover", text=None, text_file=b"  Tekst z pliku  ")
 
     assert (status_code, media_type, body) == (200, "audio/mpeg", FAKE_AUDIO)
-    assert calls == [("voiceover", "Tekst z pliku", FAKE_VIDEO)]
+    assert calls == [("render", "Tekst z pliku", FAKE_VIDEO, "voiceover", None, None, "voiceover.mp3")]
 
 
 def test_render_accepts_voice_override(monkeypatch) -> None:
     calls = []
-    voices = []
     patch_pipeline(monkeypatch, calls)
-
-    class FakeTTSProvider:
-        def __init__(self, voice) -> None:
-            voices.append(voice)
-
-    monkeypatch.setattr("api.TTSProvider", FakeTTSProvider)
 
     status_code, media_type, body = run_render("voiceover", text="Test", voice="  en-US-AvaNeural  ")
 
     assert (status_code, media_type, body) == (200, "audio/mpeg", FAKE_AUDIO)
-    assert voices == ["en-US-AvaNeural"]
-    assert calls == [("voiceover", "Test", FAKE_VIDEO)]
+    assert calls == [("render", "Test", FAKE_VIDEO, "voiceover", "  en-US-AvaNeural  ", None, "voiceover.mp3")]
 
 
 def test_render_subtitles_returns_srt(monkeypatch) -> None:
@@ -192,10 +176,7 @@ def test_render_subtitles_returns_srt(monkeypatch) -> None:
     status_code, media_type, body = run_render("subtitles", text="Test napisow")
 
     assert (status_code, media_type, body) == (200, "application/x-subrip", FAKE_SRT.encode())
-    assert calls == [
-        ("voiceover", "Test napisow", FAKE_VIDEO),
-        ("subtitles", FAKE_AUDIO, "pl"),
-    ]
+    assert calls == [("render", "Test napisow", FAKE_VIDEO, "subtitles", None, None, "subtitles.srt")]
 
 
 def test_render_accepts_language_override_for_subtitles(monkeypatch) -> None:
@@ -205,10 +186,7 @@ def test_render_accepts_language_override_for_subtitles(monkeypatch) -> None:
     status_code, media_type, body = run_render("subtitles", text="Test subtitles", language="  en  ")
 
     assert (status_code, media_type, body) == (200, "application/x-subrip", FAKE_SRT.encode())
-    assert calls == [
-        ("voiceover", "Test subtitles", FAKE_VIDEO),
-        ("subtitles", FAKE_AUDIO, "en"),
-    ]
+    assert calls == [("render", "Test subtitles", FAKE_VIDEO, "subtitles", None, "  en  ", "subtitles.srt")]
 
 
 def test_render_dubbed_returns_mp4(monkeypatch) -> None:
@@ -218,10 +196,7 @@ def test_render_dubbed_returns_mp4(monkeypatch) -> None:
     status_code, media_type, body = run_render("dubbed", text="Test dubbingu")
 
     assert (status_code, media_type, body) == (200, "video/mp4", b"fake dubbed mp4")
-    assert calls == [
-        ("voiceover", "Test dubbingu", FAKE_VIDEO),
-        ("ffmpeg", FAKE_VIDEO, FAKE_AUDIO, None, "dubbed"),
-    ]
+    assert calls == [("render", "Test dubbingu", FAKE_VIDEO, "dubbed", None, None, "dubbed.mp4")]
 
 
 def test_render_subtitled_returns_mp4(monkeypatch) -> None:
@@ -231,11 +206,7 @@ def test_render_subtitled_returns_mp4(monkeypatch) -> None:
     status_code, media_type, body = run_render("subtitled", text="Test napisow w filmie")
 
     assert (status_code, media_type, body) == (200, "video/mp4", b"fake subtitled mp4")
-    assert calls == [
-        ("voiceover", "Test napisow w filmie", FAKE_VIDEO),
-        ("subtitles", FAKE_AUDIO, "pl"),
-        ("ffmpeg", FAKE_VIDEO, FAKE_AUDIO, FAKE_SRT, "subtitles_only"),
-    ]
+    assert calls == [("render", "Test napisow w filmie", FAKE_VIDEO, "subtitled", None, None, "subtitled.mp4")]
 
 
 def test_render_full_returns_mp4(monkeypatch) -> None:
@@ -245,11 +216,7 @@ def test_render_full_returns_mp4(monkeypatch) -> None:
     status_code, media_type, body = run_render("full", text="Test pelnego filmu")
 
     assert (status_code, media_type, body) == (200, "video/mp4", b"fake full mp4")
-    assert calls == [
-        ("voiceover", "Test pelnego filmu", FAKE_VIDEO),
-        ("subtitles", FAKE_AUDIO, "pl"),
-        ("ffmpeg", FAKE_VIDEO, FAKE_AUDIO, FAKE_SRT, "full"),
-    ]
+    assert calls == [("render", "Test pelnego filmu", FAKE_VIDEO, "full", None, None, "full.mp4")]
 
 
 def test_render_requires_text() -> None:
@@ -364,15 +331,10 @@ def test_render_wraps_upload_failures() -> None:
 
 
 def test_render_wraps_voiceover_failures(monkeypatch) -> None:
-    class FailingVoiceoverService:
-        def __init__(self, tts_provider) -> None:
-            self.tts_provider = tts_provider
+    async def failing_render_variant(**kwargs) -> None:
+        raise VoiceoverGenerationError()
 
-        async def create_and_adjust_voiceover(self, text, source_video_path, output_audio_path) -> None:
-            raise RuntimeError("tts exploded")
-
-    monkeypatch.setattr("api.TTSProvider", lambda voice: object())
-    monkeypatch.setattr("api.VoiceoverService", FailingVoiceoverService)
+    monkeypatch.setattr("api.render_variant", failing_render_variant)
 
     with pytest.raises(VoiceoverGenerationError) as exc_info:
         asyncio.run(render(video=FakeUpload(FAKE_VIDEO), text="Test", variant="voiceover"))
@@ -386,18 +348,10 @@ def test_render_wraps_voiceover_failures(monkeypatch) -> None:
 
 
 def test_render_wraps_subtitle_failures(monkeypatch) -> None:
-    calls = []
-    patch_pipeline(monkeypatch, calls)
+    async def failing_render_variant(**kwargs) -> None:
+        raise SubtitleGenerationError()
 
-    class FailingSubtitleService:
-        def __init__(self, whisper_provider) -> None:
-            self.whisper_provider = whisper_provider
-
-        def generate_srt_from_audio(self, audio_path, output_srt_path, language="pl") -> None:
-            raise RuntimeError("whisper exploded")
-
-    monkeypatch.setattr("api.WhisperProvider", lambda model_name: object())
-    monkeypatch.setattr("api.SubtitleService", FailingSubtitleService)
+    monkeypatch.setattr("api.render_variant", failing_render_variant)
 
     with pytest.raises(SubtitleGenerationError) as exc_info:
         asyncio.run(render(video=FakeUpload(FAKE_VIDEO), text="Test", variant="subtitles"))
@@ -411,13 +365,10 @@ def test_render_wraps_subtitle_failures(monkeypatch) -> None:
 
 
 def test_render_wraps_video_failures(monkeypatch) -> None:
-    calls = []
-    patch_pipeline(monkeypatch, calls)
+    async def failing_render_variant(**kwargs) -> None:
+        raise VideoRenderError()
 
-    def fake_merge_videos(source_video, dubbed_audio, subtitles_file, output_path, variant="full") -> None:
-        raise RuntimeError("ffmpeg exploded")
-
-    monkeypatch.setattr("api.FFmpegProvider.merge_videos", fake_merge_videos)
+    monkeypatch.setattr("api.render_variant", failing_render_variant)
 
     with pytest.raises(VideoRenderError) as exc_info:
         asyncio.run(render(video=FakeUpload(FAKE_VIDEO), text="Test", variant="dubbed"))

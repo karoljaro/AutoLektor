@@ -10,26 +10,17 @@ from fastapi import FastAPI, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.background import BackgroundTask
 
-from config import TRANSCRIPTION_LANGUAGE, VOICE, WHISPER_MODEL
 from exceptions import (
     AutoLektorError,
     EmptyVideoError,
     EmptyTextError,
-    SubtitleGenerationError,
     TextFileReadError,
     TextInputConflictError,
-    UnsupportedVariantError,
     UnsupportedVideoTypeError,
     UploadSaveError,
     VideoTooLargeError,
-    VideoRenderError,
-    VoiceoverGenerationError,
 )
-from providers.ffmpeg_provider import FFmpegProvider
-from providers.tts_provider import TTSProvider
-from providers.whisper_provider import WhisperProvider
-from services.subtitle_service import SubtitleService
-from services.voiceover_service import VoiceoverService
+from pipeline import VARIANTS, VariantSpec, get_variant, render_variant
 
 app = FastAPI(title="AutoLektor API")
 CHUNK_SIZE = 1024 * 1024
@@ -39,19 +30,9 @@ SUPPORTED_VIDEO_SUFFIXES = {".mp4"}
 
 
 @dataclass(frozen=True)
-class VariantSpec:
-    filename: str
-    media_type: str
-    needs_subtitles: bool = False
-    ffmpeg_variant: str | None = None
-
-
-@dataclass(frozen=True)
 class RenderWorkspace:
     root: Path
     source_video: Path
-    audio: Path
-    subtitles: Path
 
     @classmethod
     def create(cls) -> "RenderWorkspace":
@@ -59,31 +40,10 @@ class RenderWorkspace:
         return cls(
             root=root,
             source_video=root / "source.mp4",
-            audio=root / "voiceover.mp3",
-            subtitles=root / "subtitles.srt",
         )
 
     def response_path(self, variant: VariantSpec) -> Path:
         return self.root / variant.filename
-
-
-VARIANTS = {
-    "voiceover": VariantSpec(filename="voiceover.mp3", media_type="audio/mpeg"),
-    "subtitles": VariantSpec(filename="subtitles.srt", media_type="application/x-subrip", needs_subtitles=True),
-    "dubbed": VariantSpec(filename="dubbed.mp4", media_type="video/mp4", ffmpeg_variant="dubbed"),
-    "subtitled": VariantSpec(
-        filename="subtitled.mp4",
-        media_type="video/mp4",
-        needs_subtitles=True,
-        ffmpeg_variant="subtitles_only",
-    ),
-    "full": VariantSpec(
-        filename="full.mp4",
-        media_type="video/mp4",
-        needs_subtitles=True,
-        ffmpeg_variant="full",
-    ),
-}
 
 
 @app.exception_handler(AutoLektorError)
@@ -150,53 +110,6 @@ async def resolve_text_input(text: str | None, text_file: UploadFile | None) -> 
     return cleaned_text
 
 
-def resolve_voice(voice: str | None) -> str:
-    return (voice or "").strip() or VOICE
-
-
-def resolve_language(language: str | None) -> str:
-    return (language or "").strip() or TRANSCRIPTION_LANGUAGE
-
-
-async def create_voiceover(text: str, workspace: RenderWorkspace, voice: str) -> None:
-    try:
-        voiceover_service = VoiceoverService(TTSProvider(voice=voice))
-        await voiceover_service.create_and_adjust_voiceover(
-            text=text,
-            source_video_path=str(workspace.source_video),
-            output_audio_path=str(workspace.audio),
-        )
-    except Exception as exc:
-        raise VoiceoverGenerationError() from exc
-
-
-def create_subtitles(workspace: RenderWorkspace, language: str) -> None:
-    try:
-        subtitle_service = SubtitleService(WhisperProvider(model_name=WHISPER_MODEL))
-        subtitle_service.generate_srt_from_audio(
-            audio_path=str(workspace.audio),
-            output_srt_path=str(workspace.subtitles),
-            language=language,
-        )
-    except Exception as exc:
-        raise SubtitleGenerationError() from exc
-
-
-def create_video(workspace: RenderWorkspace, variant: VariantSpec) -> None:
-    if variant.ffmpeg_variant is None:
-        return
-    try:
-        FFmpegProvider.merge_videos(
-            source_video=str(workspace.source_video),
-            dubbed_audio=str(workspace.audio),
-            subtitles_file=str(workspace.subtitles),
-            output_path=str(workspace.response_path(variant)),
-            variant=variant.ffmpeg_variant,
-        )
-    except Exception as exc:
-        raise VideoRenderError() from exc
-
-
 def response_for_variant(workspace: RenderWorkspace, variant: VariantSpec) -> FileResponse:
     return FileResponse(
         workspace.response_path(variant),
@@ -216,21 +129,23 @@ async def render(
     text_file: Annotated[UploadFile | None, File()] = None,
 ) -> FileResponse:
     cleaned_text = await resolve_text_input(text, text_file)
-    selected_voice = resolve_voice(voice)
-    selected_language = resolve_language(language)
-    variant_spec = VARIANTS.get(variant)
-    if variant_spec is None:
-        raise UnsupportedVariantError(variant)
+    variant_spec = get_variant(variant)
     validate_video_upload(video)
 
     workspace = RenderWorkspace.create()
+    output_path = workspace.response_path(variant_spec)
 
     try:
         await save_upload(video, workspace.source_video)
-        await create_voiceover(cleaned_text, workspace, selected_voice)
-        if variant_spec.needs_subtitles:
-            create_subtitles(workspace, selected_language)
-        create_video(workspace, variant_spec)
+        await render_variant(
+            text=cleaned_text,
+            source_video=workspace.source_video,
+            output_path=output_path,
+            variant=variant,
+            work_dir=workspace.root,
+            voice=voice,
+            language=language,
+        )
     except Exception:
         shutil.rmtree(workspace.root, ignore_errors=True)
         raise
