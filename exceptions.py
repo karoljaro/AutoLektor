@@ -78,6 +78,15 @@ class UnsupportedVideoTypeError(AutoLektorError):
         super().__init__("unsupported video type: expected MP4 video")
 
 
+class VideoTooLargeError(AutoLektorError):
+    error_name = "VIDEO_TOO_LARGE"
+    status_code = HTTPStatus.REQUEST_ENTITY_TOO_LARGE
+    stage = "input"
+
+    def __init__(self, max_size_bytes: int) -> None:
+        super().__init__(f"video file exceeds maximum size of {max_size_bytes} bytes")
+
+
 class UploadSaveError(AutoLektorError):
     error_name = "UPLOAD_SAVE_FAILED"
     stage = "upload"

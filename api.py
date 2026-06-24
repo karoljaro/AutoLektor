@@ -21,6 +21,7 @@ from exceptions import (
     UnsupportedVariantError,
     UnsupportedVideoTypeError,
     UploadSaveError,
+    VideoTooLargeError,
     VideoRenderError,
     VoiceoverGenerationError,
 )
@@ -32,6 +33,7 @@ from services.voiceover_service import VoiceoverService
 
 app = FastAPI(title="AutoLektor API")
 CHUNK_SIZE = 1024 * 1024
+MAX_VIDEO_UPLOAD_SIZE_BYTES = 500 * 1024 * 1024
 SUPPORTED_VIDEO_CONTENT_TYPES = {"video/mp4"}
 SUPPORTED_VIDEO_SUFFIXES = {".mp4"}
 
@@ -111,6 +113,10 @@ async def save_upload(upload: UploadFile, destination: Path) -> None:
             while chunk := await upload.read(CHUNK_SIZE):
                 output_file.write(chunk)
                 bytes_written += len(chunk)
+                if bytes_written > MAX_VIDEO_UPLOAD_SIZE_BYTES:
+                    raise VideoTooLargeError(MAX_VIDEO_UPLOAD_SIZE_BYTES)
+    except AutoLektorError:
+        raise
     except Exception as exc:
         raise UploadSaveError() from exc
 

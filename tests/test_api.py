@@ -16,6 +16,7 @@ from exceptions import (
     UnsupportedVariantError,
     UnsupportedVideoTypeError,
     UploadSaveError,
+    VideoTooLargeError,
     VideoRenderError,
     VoiceoverGenerationError,
 )
@@ -334,6 +335,20 @@ def test_render_rejects_empty_video() -> None:
         asyncio.run(render(video=FakeUpload(b""), text="Test", variant="voiceover"))
 
     assert exc_info.value.to_response() == error_response("EMPTY_VIDEO", "video file is empty", "input")
+
+
+def test_render_rejects_video_over_size_limit(monkeypatch) -> None:
+    monkeypatch.setattr("api.MAX_VIDEO_UPLOAD_SIZE_BYTES", len(FAKE_VIDEO) - 1)
+
+    with pytest.raises(VideoTooLargeError) as exc_info:
+        asyncio.run(render(video=FakeUpload(FAKE_VIDEO), text="Test", variant="voiceover"))
+
+    assert exc_info.value.status_code == 413
+    assert exc_info.value.to_response() == error_response(
+        "VIDEO_TOO_LARGE",
+        f"video file exceeds maximum size of {len(FAKE_VIDEO) - 1} bytes",
+        "input",
+    )
 
 
 def test_render_wraps_upload_failures() -> None:
