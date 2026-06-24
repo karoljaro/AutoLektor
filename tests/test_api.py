@@ -91,12 +91,14 @@ def run_render(
     text: str | None = "Test",
     text_file: bytes | None = None,
     video: bytes = FAKE_VIDEO,
+    voice: str | None = None,
 ) -> tuple[int, str, bytes]:
     async def run_test() -> tuple[int, str, bytes]:
         response = await render(
             video=FakeUpload(video),
             text=text,
             variant=variant,
+            voice=voice,
             text_file=FakeUpload(text_file) if text_file is not None else None,
         )
         try:
@@ -147,6 +149,24 @@ def test_render_accepts_text_file(monkeypatch) -> None:
 
     assert (status_code, media_type, body) == (200, "audio/mpeg", FAKE_AUDIO)
     assert calls == [("voiceover", "Tekst z pliku", FAKE_VIDEO)]
+
+
+def test_render_accepts_voice_override(monkeypatch) -> None:
+    calls = []
+    voices = []
+    patch_pipeline(monkeypatch, calls)
+
+    class FakeTTSProvider:
+        def __init__(self, voice) -> None:
+            voices.append(voice)
+
+    monkeypatch.setattr("api.TTSProvider", FakeTTSProvider)
+
+    status_code, media_type, body = run_render("voiceover", text="Test", voice="  en-US-AvaNeural  ")
+
+    assert (status_code, media_type, body) == (200, "audio/mpeg", FAKE_AUDIO)
+    assert voices == ["en-US-AvaNeural"]
+    assert calls == [("voiceover", "Test", FAKE_VIDEO)]
 
 
 def test_render_subtitles_returns_srt(monkeypatch) -> None:

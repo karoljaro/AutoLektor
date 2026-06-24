@@ -126,9 +126,13 @@ async def resolve_text_input(text: str | None, text_file: UploadFile | None) -> 
     return cleaned_text
 
 
-async def create_voiceover(text: str, workspace: RenderWorkspace) -> None:
+def resolve_voice(voice: str | None) -> str:
+    return (voice or "").strip() or VOICE
+
+
+async def create_voiceover(text: str, workspace: RenderWorkspace, voice: str) -> None:
     try:
-        voiceover_service = VoiceoverService(TTSProvider(voice=VOICE))
+        voiceover_service = VoiceoverService(TTSProvider(voice=voice))
         await voiceover_service.create_and_adjust_voiceover(
             text=text,
             source_video_path=str(workspace.source_video),
@@ -179,9 +183,11 @@ async def render(
     video: Annotated[UploadFile, File()],
     text: Annotated[str | None, Form()] = None,
     variant: Annotated[str, Form()] = "voiceover",
+    voice: Annotated[str | None, Form()] = None,
     text_file: Annotated[UploadFile | None, File()] = None,
 ) -> FileResponse:
     cleaned_text = await resolve_text_input(text, text_file)
+    selected_voice = resolve_voice(voice)
     variant_spec = VARIANTS.get(variant)
     if variant_spec is None:
         raise UnsupportedVariantError(variant)
@@ -190,7 +196,7 @@ async def render(
 
     try:
         await save_upload(video, workspace.source_video)
-        await create_voiceover(cleaned_text, workspace)
+        await create_voiceover(cleaned_text, workspace, selected_voice)
         if variant_spec.needs_subtitles:
             create_subtitles(workspace)
         create_video(workspace, variant_spec)
