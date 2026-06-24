@@ -32,21 +32,29 @@ def test_ensure_parent_dirs_exist_creates_nested_directories(tmp_path: Path) -> 
     assert (tmp_path / "a" / "b" / "c").exists()
 
 
-def test_preflight_checks_validates_required_inputs(monkeypatch) -> None:
+def test_preflight_checks_validates_required_inputs(monkeypatch, tmp_path: Path) -> None:
+    video_path = tmp_path / "input.mp4"
+    text_path = tmp_path / "text.txt"
+    output_path = tmp_path / "out" / "voiceover.mp3"
+
     monkeypatch.setattr("main.ensure_commands_available", lambda *args: None)
     monkeypatch.setattr("main.ensure_parent_dirs_exist", lambda *args: None)
-    monkeypatch.setattr("main.file_exists", lambda path: path == main.TEXT_FILE or path == main.SOURCE_VIDEO)
+    monkeypatch.setattr("main.file_exists", lambda path: Path(path) in {video_path, text_path})
 
-    main.preflight_checks()
+    main.preflight_checks(video_path, output_path, text_path)
 
 
-def test_preflight_checks_raises_for_missing_text_file(monkeypatch) -> None:
+def test_preflight_checks_raises_for_missing_text_file(monkeypatch, tmp_path: Path) -> None:
+    video_path = tmp_path / "input.mp4"
+    text_path = tmp_path / "missing.txt"
+    output_path = tmp_path / "voiceover.mp3"
+
     monkeypatch.setattr("main.ensure_commands_available", lambda *args: None)
     monkeypatch.setattr("main.ensure_parent_dirs_exist", lambda *args: None)
-    monkeypatch.setattr("main.file_exists", lambda path: path == main.SOURCE_VIDEO)
+    monkeypatch.setattr("main.file_exists", lambda path: Path(path) == video_path)
 
     try:
-        main.preflight_checks()
+        main.preflight_checks(video_path, output_path, text_path)
     except FileNotFoundError as exc:
         assert "Text file not found" in str(exc)
     else:
@@ -71,5 +79,4 @@ def test_video_service_rejects_missing_output_keys(monkeypatch) -> None:
         assert "Missing output paths for variants" in str(exc)
     else:
         raise AssertionError("Expected ValueError for missing output variants")
-
 

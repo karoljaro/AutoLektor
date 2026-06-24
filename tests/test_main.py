@@ -1,77 +1,132 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from pathlib import Path
+
+import pytest
 
 import main
 
 
-def test_initialize_services_creates_expected_container() -> None:
-    services = main.initialize_services()
+def test_parse_args_accepts_minimal_text_file_call() -> None:
+    args = main.parse_args(["input.mp4", "--text-file", "text.txt", "--variant", "full"])
 
-    assert hasattr(services, "voiceover")
-    assert hasattr(services, "subtitles")
-    assert hasattr(services, "video")
-    assert services.voiceover.tts_provider.__class__.__name__ == "TTSProvider"
-    assert services.subtitles.whisper_provider.__class__.__name__ == "WhisperProvider"
-
-
-def test_main_runs_full_pipeline_when_text_is_present() -> None:
-    voiceover = MagicMock()
-    voiceover.create_and_adjust_voiceover = AsyncMock()
-
-    subtitles = MagicMock()
-    subtitles.generate_srt_from_audio = MagicMock()
-
-    video = MagicMock()
-    video.create_all_variants = MagicMock()
-
-    fake_services = main.PipelineServices(voiceover=voiceover, subtitles=subtitles, video=video)
-
-    with patch("main.initialize_services", return_value=fake_services), \
-         patch("main.read_text_from_file", return_value="Hello world"):
-        asyncio.run(main.main())
-
-    voiceover.create_and_adjust_voiceover.assert_awaited_once_with(
-        text="Hello world",
-        source_video_path=main.SOURCE_VIDEO,
-        output_audio_path=main.POLISH_AUDIO_FILE,
-    )
-    subtitles.generate_srt_from_audio.assert_called_once_with(
-        audio_path=main.POLISH_AUDIO_FILE,
-        output_srt_path=main.SUBTITLE_FILE,
-        language=main.TRANSCRIPTION_LANGUAGE,
-    )
-    video.create_all_variants.assert_called_once_with(
-        source_video=main.SOURCE_VIDEO,
-        dubbed_audio=main.POLISH_AUDIO_FILE,
-        subtitles_file=main.SUBTITLE_FILE,
-        output_paths={
-            "full": main.VIDEO_DUBBED_WITH_SUBTITLES,
-            "dubbed": main.VIDEO_DUBBED_ONLY,
-            "subtitles_only": main.VIDEO_SUBTITLES_ONLY,
-        },
-    )
+    assert args.video == Path("input.mp4")
+    assert args.text is None
+    assert args.text_file == Path("text.txt")
+    assert args.variant == "full"
+    assert args.output is None
 
 
-def test_main_stops_when_text_is_missing() -> None:
-    voiceover = MagicMock()
-    voiceover.create_and_adjust_voiceover = AsyncMock()
+def test_parse_args_requires_variant() -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main.parse_args(["input.mp4", "--text-file", "text.txt"])
 
-    subtitles = MagicMock()
-    subtitles.generate_srt_from_audio = MagicMock()
-
-    video = MagicMock()
-    video.create_all_variants = MagicMock()
-
-    fake_services = main.PipelineServices(voiceover=voiceover, subtitles=subtitles, video=video)
-
-    with patch("main.initialize_services", return_value=fake_services), \
-         patch("main.read_text_from_file", return_value=None):
-        asyncio.run(main.main())
-
-    voiceover.create_and_adjust_voiceover.assert_not_called()
-    subtitles.generate_srt_from_audio.assert_not_called()
-    video.create_all_variants.assert_not_called()
+    assert exc_info.value.code == 2
 
 
+def test_parse_args_requires_exactly_one_text_input() -> None:
+    with pytest.raises(SystemExit) as missing_text:
+        main.parse_args(["input.mp4", "--variant", "voiceover"])
+
+    with pytest.raises(SystemExit) as conflicting_text:
+        main.parse_args(["input.mp4", "--text", "Hello", "--text-file", "text.txt", "--variant", "voiceover"])
+
+    assert missing_text.value.code == 2
+    assert conflicting_text.value.code == 2
+
+
+def test_default_output_path_uses_input_stem_variant_and_extension() -> None:
+    assert main.default_output_path(Path("/tmp/input.mp4"), "voiceover") == Path("/tmp/input_voiceover.mp3")
+    assert main.default_output_path(Path("/tmp/input.mp4"), "subtitles") == Path("/tmp/input_subtitles.srt")
+    assert main.default_output_path(Path("/tmp/input.mp4"), "full") == Path("/tmp/input_full.mp4")
+
+
+def test_resolve_cli_text_accepts_inline_text() -> None:
+    assert main.resolve_cli_text("  Hello world  ", None) == "Hello world"
+
+
+def test_resolve_cli_text_reads_text_file(monkeypatch) -> None:
+    monkeypatch.setattr("main.read_text_from_file", lambda path: "Text from file")
+
+    assert main.resolve_cli_text(None, Path("text.txt")) == "Text from file"
+
+
+def test_run_cli_calls_pipeline_with_expected_arguments(monkeypatch, tmp_path: Path) -> None:
+    calls = []
+    video_path = tmp_path / "input.mp4"
+    text_path = tmp_path / "text.txt"
+    output_path = tmp_path / "out.mp4"
+    video_path.write_bytes(b"video")
+    text_path.write_text("Text from file", encoding="utf-8")
+
+    async def fake_render_variant(**kwargs) -> Path:
+        calls.append(kwargs)
+        Path(kwargs["output_path"]).write_bytes(b"output")
+        return Path(kwargs["output_path"])
+
+    monkeypatch.setattr("main.preflight_checks", lambda *args: None)
+    monkeypatch.setattr("main.render_variant", fake_render_variant)
+    args = main.parse_args([
+        str(video_path),
+        "--text-file",
+        str(text_path),
+        "--variant",
+        "dubbed",
+        "-o",
+        str(output_path),
+        "--voice",
+        "en-US-AvaNeural",
+    ])
+
+    result = asyncio.run(main.run_cli(args))
+
+    assert result == 0
+    assert calls[0]["text"] == "Text from file"
+    assert calls[0]["source_video"] == video_path
+    assert calls[0]["output_path"] == output_path
+    assert calls[0]["variant"] == "dubbed"
+    assert calls[0]["voice"] == "en-US-AvaNeural"
+    assert calls[0]["language"] is None
+    assert calls[0]["work_dir"].name.startswith("autolektor-cli-")
+
+
+def test_run_cli_uses_default_output_path(monkeypatch, tmp_path: Path) -> None:
+    calls = []
+    video_path = tmp_path / "input.mp4"
+    video_path.write_bytes(b"video")
+
+    async def fake_render_variant(**kwargs) -> Path:
+        calls.append(kwargs)
+        Path(kwargs["output_path"]).write_bytes(b"output")
+        return Path(kwargs["output_path"])
+
+    monkeypatch.setattr("main.preflight_checks", lambda *args: None)
+    monkeypatch.setattr("main.render_variant", fake_render_variant)
+    args = main.parse_args([str(video_path), "--text", "Hello", "--variant", "voiceover", "--language", "pl"])
+
+    result = asyncio.run(main.run_cli(args))
+
+    assert result == 0
+    assert calls[0]["output_path"] == tmp_path / "input_voiceover.mp3"
+    assert calls[0]["text"] == "Hello"
+    assert calls[0]["language"] == "pl"
+
+
+def test_run_cli_returns_1_for_empty_text(monkeypatch, tmp_path: Path) -> None:
+    calls = []
+    video_path = tmp_path / "input.mp4"
+    video_path.write_bytes(b"video")
+
+    async def fake_render_variant(**kwargs) -> Path:
+        calls.append(kwargs)
+        return Path(kwargs["output_path"])
+
+    monkeypatch.setattr("main.preflight_checks", lambda *args: None)
+    monkeypatch.setattr("main.render_variant", fake_render_variant)
+    args = main.parse_args([str(video_path), "--text", "   ", "--variant", "voiceover"])
+
+    result = asyncio.run(main.run_cli(args))
+
+    assert result == 1
+    assert calls == []

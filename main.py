@@ -1,124 +1,100 @@
+"""Command-line entry point for AutoLektor."""
+
+from __future__ import annotations
+
+import argparse
 import asyncio
+from collections.abc import Sequence
+from pathlib import Path
+import tempfile
 import warnings
-from dataclasses import dataclass
 
-from config import (
-    TEXT_FILE, VOICE, POLISH_AUDIO_FILE, SUBTITLE_FILE, SOURCE_VIDEO,
-    VIDEO_DUBBED_WITH_SUBTITLES, VIDEO_DUBBED_ONLY, VIDEO_SUBTITLES_ONLY,
-    WHISPER_MODEL, TRANSCRIPTION_LANGUAGE
-)
-from helpers import read_text_from_file, file_exists
+from exceptions import EmptyTextError
+from helpers import file_exists, read_text_from_file
 from helpers.preflight import ensure_commands_available, ensure_parent_dirs_exist
-from providers.tts_provider import TTSProvider
-from providers.whisper_provider import WhisperProvider
-from services.subtitle_service import SubtitleService
-from services.video_service import VideoService
-from services.voiceover_service import VoiceoverService
 from logger import get_logger
+from pipeline import VARIANTS, render_variant
 
-# Suppress non-essential warnings
 warnings.filterwarnings("ignore")
 
-
-@dataclass(frozen=True)
-class PipelineServices:
-    """Typed container for initialized services."""
-
-    voiceover: VoiceoverService
-    subtitles: SubtitleService
-    video: VideoService
-
-
 logger = get_logger(__name__)
-# ==========================================
-# INITIALIZATION
-# ==========================================
-
-def initialize_services() -> PipelineServices:
-    """Initialize all services and providers."""
-    # Providers
-    tts_provider = TTSProvider(voice=VOICE)
-    whisper_provider = WhisperProvider(model_name=WHISPER_MODEL)
-
-    # Services
-    voiceover_service = VoiceoverService(tts_provider)
-    subtitle_service = SubtitleService(whisper_provider)
-    video_service = VideoService()
-
-    return PipelineServices(
-        voiceover=voiceover_service,
-        subtitles=subtitle_service,
-        video=video_service,
-    )
 
 
-def preflight_checks() -> None:
-    """Validate required files, directories and external tools before processing."""
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Generate AutoLektor voiceover, subtitles or video variants.")
+    parser.add_argument("video", type=Path, help="Source MP4 video path.")
+    text_group = parser.add_mutually_exclusive_group(required=True)
+    text_group.add_argument("--text", help="Text to render into the output.")
+    text_group.add_argument("--text-file", type=Path, help="UTF-8 text file to render into the output.")
+    parser.add_argument("--variant", required=True, choices=sorted(VARIANTS), help="Output variant to generate.")
+    parser.add_argument("-o", "--output", type=Path, help="Output path. Defaults to <input>_<variant>.<ext>.")
+    parser.add_argument("--voice", help="Optional edge-tts voice. Defaults to config.VOICE.")
+    parser.add_argument("--language", help="Optional subtitle language. Defaults to config.TRANSCRIPTION_LANGUAGE.")
+    return parser
+
+
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    return build_parser().parse_args(argv)
+
+
+def default_output_path(video_path: Path, variant: str) -> Path:
+    suffix = Path(VARIANTS[variant].filename).suffix
+    return video_path.with_name(f"{video_path.stem}_{variant}{suffix}")
+
+
+def resolve_output_path(video_path: Path, output_path: Path | None, variant: str) -> Path:
+    return (output_path or default_output_path(video_path, variant)).expanduser()
+
+
+def resolve_cli_text(text: str | None, text_file: Path | None) -> str:
+    if text is not None:
+        cleaned_text = text.strip()
+        if not cleaned_text:
+            raise EmptyTextError()
+        return cleaned_text
+
+    loaded_text = read_text_from_file(str(text_file))
+    if not loaded_text:
+        raise EmptyTextError()
+    return loaded_text
+
+
+def preflight_checks(video_path: Path, output_path: Path, text_file: Path | None = None) -> None:
     ensure_commands_available("ffmpeg", "ffprobe")
-    ensure_parent_dirs_exist(POLISH_AUDIO_FILE, SUBTITLE_FILE, VIDEO_DUBBED_WITH_SUBTITLES, VIDEO_DUBBED_ONLY, VIDEO_SUBTITLES_ONLY)
+    if not file_exists(str(video_path)):
+        raise FileNotFoundError(f"Source video not found: {video_path}")
+    if text_file is not None and not file_exists(str(text_file)):
+        raise FileNotFoundError(f"Text file not found: {text_file}")
+    ensure_parent_dirs_exist(str(output_path))
 
-    if not file_exists(TEXT_FILE):
-        raise FileNotFoundError(f"Text file not found: {TEXT_FILE}")
-    if not file_exists(SOURCE_VIDEO):
-        raise FileNotFoundError(f"Source video not found: {SOURCE_VIDEO}")
 
+async def run_cli(args: argparse.Namespace) -> int:
+    video_path = args.video.expanduser()
+    output_path = resolve_output_path(video_path, args.output, args.variant)
 
-# ==========================================
-# MAIN ORCHESTRATION
-# ==========================================
-
-async def main() -> int:
-    """Main orchestration function."""
     try:
-        logger.info("=== VIDEO AUTOMATION START ===")
-        preflight_checks()
-
-        # Initialize services
-        services = initialize_services()
-
-        # Step 0: Load text
-        loaded_text = read_text_from_file(TEXT_FILE)
-
-        if not loaded_text:
-            logger.error("=== PROCESS STOPPED ===")
-            return 1
-
-        # Step 1: Generate and adjust voiceover
-        await services.voiceover.create_and_adjust_voiceover(
-            text=loaded_text,
-            source_video_path=SOURCE_VIDEO,
-            output_audio_path=POLISH_AUDIO_FILE
-        )
-
-        # Step 2: Generate subtitles
-        services.subtitles.generate_srt_from_audio(
-            audio_path=POLISH_AUDIO_FILE,
-            output_srt_path=SUBTITLE_FILE,
-            language=TRANSCRIPTION_LANGUAGE
-        )
-
-        # Step 3: Create video variants
-        output_paths = {
-            "full": VIDEO_DUBBED_WITH_SUBTITLES,
-            "dubbed": VIDEO_DUBBED_ONLY,
-            "subtitles_only": VIDEO_SUBTITLES_ONLY
-        }
-
-        if not services.video.create_all_variants(
-            source_video=SOURCE_VIDEO,
-            dubbed_audio=POLISH_AUDIO_FILE,
-            subtitles_file=SUBTITLE_FILE,
-            output_paths=output_paths
-        ):
-            return 1
-
-        logger.info("=== END ===")
+        preflight_checks(video_path, output_path, args.text_file)
+        text = resolve_cli_text(args.text, args.text_file)
+        with tempfile.TemporaryDirectory(prefix="autolektor-cli-") as temp_dir:
+            await render_variant(
+                text=text,
+                source_video=video_path,
+                output_path=output_path,
+                variant=args.variant,
+                work_dir=Path(temp_dir),
+                voice=args.voice,
+                language=args.language,
+            )
+        logger.info("Saved output: %s", output_path)
         return 0
     except Exception as exc:
-        logger.exception("Pipeline failed: %s", exc)
+        logger.exception("CLI render failed: %s", exc)
         return 1
 
 
-# Run the script
+def main(argv: Sequence[str] | None = None) -> int:
+    return asyncio.run(run_cli(parse_args(argv)))
+
+
 if __name__ == "__main__":
-    raise SystemExit(asyncio.run(main()))
+    raise SystemExit(main())
