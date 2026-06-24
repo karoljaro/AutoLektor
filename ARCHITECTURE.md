@@ -173,12 +173,6 @@ Dependencies:
 - `WhisperProvider`
 - `helpers.time_helpers.format_time`
 
-### `VideoService`
-
-Legacy helper for the old "create all variants" workflow. Current API and CLI use `pipeline.py` directly.
-
-Keep it until there is an explicit decision to remove it.
-
 ## Providers
 
 Providers wrap external tools and libraries:

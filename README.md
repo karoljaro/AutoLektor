@@ -192,7 +192,7 @@ AutoLektor/
 ├── exceptions.py           # Domain errors for API/n8n
 ├── helpers/                # File, duration, time and preflight helpers
 ├── providers/              # edge-tts, Whisper and FFmpeg wrappers
-├── services/               # Voiceover, subtitle and legacy video services
+├── services/               # Voiceover and subtitle services
 ├── scripts/                # Smoke-test helpers
 ├── tests/                  # Automated tests
 └── example/                # Local ignored examples

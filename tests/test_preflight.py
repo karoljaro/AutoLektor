@@ -5,7 +5,6 @@ from unittest.mock import patch
 
 import main
 from helpers.preflight import escape_ffmpeg_filter_path, ensure_commands_available, ensure_parent_dirs_exist
-from services.video_service import VideoService
 
 
 def test_escape_ffmpeg_filter_path_escapes_special_chars() -> None:
@@ -59,24 +58,4 @@ def test_preflight_checks_raises_for_missing_text_file(monkeypatch, tmp_path: Pa
         assert "Text file not found" in str(exc)
     else:
         raise AssertionError("Expected FileNotFoundError for missing text file")
-
-
-def test_video_service_rejects_missing_output_keys(monkeypatch) -> None:
-    monkeypatch.setattr("services.video_service.file_exists", lambda path: True)
-    fake_ffmpeg = type("F", (), {"merge_videos": lambda *args, **kwargs: None})()
-    monkeypatch.setattr("services.video_service.FFmpegProvider", lambda: fake_ffmpeg)
-
-    service = VideoService()
-
-    try:
-        service.create_all_variants(
-            source_video="video.mp4",
-            dubbed_audio="audio.mp3",
-            subtitles_file="subs.srt",
-            output_paths={"full": "full.mp4", "dubbed": "dubbed.mp4"},
-        )
-    except ValueError as exc:
-        assert "Missing output paths for variants" in str(exc)
-    else:
-        raise AssertionError("Expected ValueError for missing output variants")
 

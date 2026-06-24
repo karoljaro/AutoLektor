@@ -5,7 +5,6 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from services.subtitle_service import SubtitleService
-from services.video_service import VideoService
 from services.voiceover_service import VoiceoverService
 
 
@@ -62,52 +61,5 @@ def test_subtitle_service_writes_srt_file(tmp_path: Path) -> None:
         "2\n00:00:01,200 --> 00:00:02,500\nworld\n\n"
     )
     whisper_provider.transcribe.assert_called_once_with("audio.mp3", language="pl")
-
-
-def test_video_service_creates_all_variants(monkeypatch) -> None:
-    fake_ffmpeg = MagicMock()
-    fake_ffmpeg.merge_videos = MagicMock()
-
-    monkeypatch.setattr("services.video_service.FFmpegProvider", lambda: fake_ffmpeg)
-    monkeypatch.setattr("services.video_service.file_exists", lambda path: True)
-
-    service = VideoService()
-    result = service.create_all_variants(
-        source_video="video.mp4",
-        dubbed_audio="audio.mp3",
-        subtitles_file="subs.srt",
-        output_paths={
-            "full": "full.mp4",
-            "dubbed": "dubbed.mp4",
-            "subtitles_only": "subs_only.mp4",
-        },
-    )
-
-    assert result is True
-    assert fake_ffmpeg.merge_videos.call_count == 3
-    fake_ffmpeg.merge_videos.assert_any_call("video.mp4", "audio.mp3", "subs.srt", "full.mp4", variant="full")
-    fake_ffmpeg.merge_videos.assert_any_call("video.mp4", "audio.mp3", "subs.srt", "dubbed.mp4", variant="dubbed")
-    fake_ffmpeg.merge_videos.assert_any_call("video.mp4", "audio.mp3", "subs.srt", "subs_only.mp4", variant="subtitles_only")
-
-
-def test_video_service_returns_false_when_source_video_missing(monkeypatch) -> None:
-    fake_ffmpeg = MagicMock()
-    fake_ffmpeg.merge_videos = MagicMock()
-
-    monkeypatch.setattr("services.video_service.FFmpegProvider", lambda: fake_ffmpeg)
-    monkeypatch.setattr("services.video_service.file_exists", lambda path: False)
-
-    service = VideoService()
-    result = service.create_all_variants(
-        source_video="missing.mp4",
-        dubbed_audio="audio.mp3",
-        subtitles_file="subs.srt",
-        output_paths={"full": "full.mp4", "dubbed": "dubbed.mp4", "subtitles_only": "subs_only.mp4"},
-    )
-
-    assert result is False
-    fake_ffmpeg.merge_videos.assert_not_called()
-
-
 
 
