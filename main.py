@@ -9,7 +9,7 @@ from pathlib import Path
 import tempfile
 import warnings
 
-from exceptions import EmptyTextError
+from exceptions import AutoLektorError, EmptyTextError
 from helpers import file_exists, read_text_from_file
 from helpers.preflight import ensure_commands_available, ensure_parent_dirs_exist
 from logger import get_logger
@@ -94,6 +94,9 @@ async def run_cli(args: argparse.Namespace) -> int:
             )
         logger.info("Saved output: %s", output_path)
         return 0
+    except AutoLektorError as exc:
+        logger.error("CLI render failed: %s: %s", exc.error_name, exc.message)
+        return 1
     except Exception as exc:
         logger.exception("CLI render failed: %s", exc)
         return 1

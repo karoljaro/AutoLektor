@@ -173,3 +173,27 @@ def test_run_cli_returns_1_for_empty_text(monkeypatch, tmp_path: Path) -> None:
 
     assert result == 1
     assert calls == []
+
+
+def test_run_cli_logs_domain_errors_without_traceback(monkeypatch, tmp_path: Path) -> None:
+    errors = []
+    exceptions = []
+    video_path = tmp_path / "input.mp4"
+    video_path.write_bytes(b"video")
+
+    class FakeLogger:
+        def error(self, *args) -> None:
+            errors.append(args)
+
+        def exception(self, *args) -> None:
+            exceptions.append(args)
+
+    monkeypatch.setattr("main.preflight_checks", lambda *args: None)
+    monkeypatch.setattr("main.logger", FakeLogger())
+    args = main.parse_args([str(video_path), "--text", "   ", "--variant", "voiceover"])
+
+    result = asyncio.run(main.run_cli(args))
+
+    assert result == 1
+    assert errors == [("CLI render failed: %s: %s", "EMPTY_TEXT", "text is required")]
+    assert exceptions == []
