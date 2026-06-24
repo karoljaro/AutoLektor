@@ -40,6 +40,15 @@ class FailingUpload:
         raise OSError("cannot read upload")
 
 
+def error_response(error: str, detail: str, stage: str, retryable: bool = False) -> dict[str, str | bool]:
+    return {
+        "error": error,
+        "detail": detail,
+        "stage": stage,
+        "retryable": retryable,
+    }
+
+
 def patch_pipeline(
     monkeypatch,
     calls: list[tuple],
@@ -127,10 +136,7 @@ def test_autolektor_error_handler_returns_n8n_friendly_json() -> None:
     response = asyncio.run(autolektor_error_handler(None, UnsupportedVariantError("bad")))
 
     assert response.status_code == 400
-    assert json.loads(response.body) == {
-        "error": "UNSUPPORTED_VARIANT",
-        "detail": "unsupported variant: bad",
-    }
+    assert json.loads(response.body) == error_response("UNSUPPORTED_VARIANT", "unsupported variant: bad", "input")
 
 
 def test_render_voiceover_returns_mp3(monkeypatch) -> None:
@@ -242,7 +248,7 @@ def test_render_requires_text() -> None:
     with pytest.raises(EmptyTextError) as exc_info:
         asyncio.run(render(video=FakeUpload(FAKE_VIDEO), text="   ", variant="voiceover"))
 
-    assert exc_info.value.to_response() == {"error": "EMPTY_TEXT", "detail": "text is required"}
+    assert exc_info.value.to_response() == error_response("EMPTY_TEXT", "text is required", "input")
 
 
 def test_render_rejects_text_and_text_file_together() -> None:
@@ -256,57 +262,59 @@ def test_render_rejects_text_and_text_file_together() -> None:
             )
         )
 
-    assert exc_info.value.to_response() == {
-        "error": "TEXT_INPUT_CONFLICT",
-        "detail": "provide either text or text_file, not both",
-    }
+    assert exc_info.value.to_response() == error_response(
+        "TEXT_INPUT_CONFLICT",
+        "provide either text or text_file, not both",
+        "input",
+    )
 
 
 def test_render_rejects_empty_text_file() -> None:
     with pytest.raises(EmptyTextError) as exc_info:
         asyncio.run(render(video=FakeUpload(FAKE_VIDEO), text=None, text_file=FakeUpload(b" \n "), variant="voiceover"))
 
-    assert exc_info.value.to_response() == {"error": "EMPTY_TEXT", "detail": "text is required"}
+    assert exc_info.value.to_response() == error_response("EMPTY_TEXT", "text is required", "input")
 
 
 def test_render_wraps_text_file_read_failures() -> None:
     with pytest.raises(TextFileReadError) as exc_info:
         asyncio.run(render(video=FakeUpload(FAKE_VIDEO), text=None, text_file=FailingUpload(), variant="voiceover"))
 
-    assert exc_info.value.to_response() == {
-        "error": "TEXT_FILE_READ_FAILED",
-        "detail": "failed to read text_file as UTF-8 text",
-    }
+    assert exc_info.value.to_response() == error_response(
+        "TEXT_FILE_READ_FAILED",
+        "failed to read text_file as UTF-8 text",
+        "input",
+    )
 
 
 def test_render_rejects_non_utf8_text_file() -> None:
     with pytest.raises(TextFileReadError) as exc_info:
         asyncio.run(render(video=FakeUpload(FAKE_VIDEO), text=None, text_file=FakeUpload(b"\xff"), variant="voiceover"))
 
-    assert exc_info.value.to_response() == {
-        "error": "TEXT_FILE_READ_FAILED",
-        "detail": "failed to read text_file as UTF-8 text",
-    }
+    assert exc_info.value.to_response() == error_response(
+        "TEXT_FILE_READ_FAILED",
+        "failed to read text_file as UTF-8 text",
+        "input",
+    )
 
 
 def test_render_rejects_unsupported_variant() -> None:
     with pytest.raises(UnsupportedVariantError) as exc_info:
         asyncio.run(render(video=FakeUpload(FAKE_VIDEO), text="Test", variant="bad"))
 
-    assert exc_info.value.to_response() == {
-        "error": "UNSUPPORTED_VARIANT",
-        "detail": "unsupported variant: bad",
-    }
+    assert exc_info.value.to_response() == error_response("UNSUPPORTED_VARIANT", "unsupported variant: bad", "input")
 
 
 def test_render_wraps_upload_failures() -> None:
     with pytest.raises(UploadSaveError) as exc_info:
         asyncio.run(render(video=FailingUpload(), text="Test", variant="voiceover"))
 
-    assert exc_info.value.to_response() == {
-        "error": "UPLOAD_SAVE_FAILED",
-        "detail": "failed to save uploaded video",
-    }
+    assert exc_info.value.to_response() == error_response(
+        "UPLOAD_SAVE_FAILED",
+        "failed to save uploaded video",
+        "upload",
+        retryable=True,
+    )
 
 
 def test_render_wraps_voiceover_failures(monkeypatch) -> None:
@@ -323,10 +331,12 @@ def test_render_wraps_voiceover_failures(monkeypatch) -> None:
     with pytest.raises(VoiceoverGenerationError) as exc_info:
         asyncio.run(render(video=FakeUpload(FAKE_VIDEO), text="Test", variant="voiceover"))
 
-    assert exc_info.value.to_response() == {
-        "error": "VOICEOVER_GENERATION_FAILED",
-        "detail": "failed to generate voiceover",
-    }
+    assert exc_info.value.to_response() == error_response(
+        "VOICEOVER_GENERATION_FAILED",
+        "failed to generate voiceover",
+        "voiceover",
+        retryable=True,
+    )
 
 
 def test_render_wraps_subtitle_failures(monkeypatch) -> None:
@@ -346,10 +356,12 @@ def test_render_wraps_subtitle_failures(monkeypatch) -> None:
     with pytest.raises(SubtitleGenerationError) as exc_info:
         asyncio.run(render(video=FakeUpload(FAKE_VIDEO), text="Test", variant="subtitles"))
 
-    assert exc_info.value.to_response() == {
-        "error": "SUBTITLE_GENERATION_FAILED",
-        "detail": "failed to generate subtitles",
-    }
+    assert exc_info.value.to_response() == error_response(
+        "SUBTITLE_GENERATION_FAILED",
+        "failed to generate subtitles",
+        "subtitles",
+        retryable=True,
+    )
 
 
 def test_render_wraps_video_failures(monkeypatch) -> None:
@@ -364,7 +376,9 @@ def test_render_wraps_video_failures(monkeypatch) -> None:
     with pytest.raises(VideoRenderError) as exc_info:
         asyncio.run(render(video=FakeUpload(FAKE_VIDEO), text="Test", variant="dubbed"))
 
-    assert exc_info.value.to_response() == {
-        "error": "VIDEO_RENDER_FAILED",
-        "detail": "failed to render video",
-    }
+    assert exc_info.value.to_response() == error_response(
+        "VIDEO_RENDER_FAILED",
+        "failed to render video",
+        "video_render",
+        retryable=True,
+    )
