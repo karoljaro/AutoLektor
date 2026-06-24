@@ -15,6 +15,8 @@ from exceptions import (
     AutoLektorError,
     EmptyTextError,
     SubtitleGenerationError,
+    TextFileReadError,
+    TextInputConflictError,
     UnsupportedVariantError,
     UploadSaveError,
     VideoRenderError,
@@ -102,6 +104,28 @@ async def cleanup_work_dir(work_dir: Path) -> None:
     shutil.rmtree(work_dir, ignore_errors=True)
 
 
+async def read_text_file(text_file: UploadFile) -> str:
+    try:
+        content = await text_file.read()
+        return content.decode("utf-8")
+    except Exception as exc:
+        raise TextFileReadError() from exc
+
+
+async def resolve_text_input(text: str | None, text_file: UploadFile | None) -> str:
+    cleaned_text = (text or "").strip()
+    if cleaned_text and text_file is not None:
+        raise TextInputConflictError()
+    if text_file is not None:
+        cleaned_file_text = (await read_text_file(text_file)).strip()
+        if not cleaned_file_text:
+            raise EmptyTextError()
+        return cleaned_file_text
+    if not cleaned_text:
+        raise EmptyTextError()
+    return cleaned_text
+
+
 async def create_voiceover(text: str, workspace: RenderWorkspace) -> None:
     try:
         voiceover_service = VoiceoverService(TTSProvider(voice=VOICE))
@@ -153,12 +177,11 @@ def response_for_variant(workspace: RenderWorkspace, variant: VariantSpec) -> Fi
 @app.post("/render")
 async def render(
     video: Annotated[UploadFile, File()],
-    text: Annotated[str, Form()],
+    text: Annotated[str | None, Form()] = None,
     variant: Annotated[str, Form()] = "voiceover",
+    text_file: Annotated[UploadFile | None, File()] = None,
 ) -> FileResponse:
-    cleaned_text = text.strip()
-    if not cleaned_text:
-        raise EmptyTextError()
+    cleaned_text = await resolve_text_input(text, text_file)
     variant_spec = VARIANTS.get(variant)
     if variant_spec is None:
         raise UnsupportedVariantError(variant)

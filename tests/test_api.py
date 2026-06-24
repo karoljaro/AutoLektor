@@ -10,6 +10,8 @@ from api import VARIANTS, app, autolektor_error_handler, health, render
 from exceptions import (
     EmptyTextError,
     SubtitleGenerationError,
+    TextFileReadError,
+    TextInputConflictError,
     UnsupportedVariantError,
     UploadSaveError,
     VideoRenderError,
@@ -26,7 +28,7 @@ class FakeUpload:
         self.content = content
         self.was_read = False
 
-    async def read(self, size: int) -> bytes:
+    async def read(self, size: int | None = None) -> bytes:
         if self.was_read:
             return b""
         self.was_read = True
@@ -34,7 +36,7 @@ class FakeUpload:
 
 
 class FailingUpload:
-    async def read(self, size: int) -> bytes:
+    async def read(self, size: int | None = None) -> bytes:
         raise OSError("cannot read upload")
 
 
@@ -83,9 +85,20 @@ def patch_pipeline(
         monkeypatch.setattr("api.FFmpegProvider.merge_videos", fake_merge_videos)
 
 
-def run_render(variant: str, *, text: str = "Test", video: bytes = FAKE_VIDEO) -> tuple[int, str, bytes]:
+def run_render(
+    variant: str,
+    *,
+    text: str | None = "Test",
+    text_file: bytes | None = None,
+    video: bytes = FAKE_VIDEO,
+) -> tuple[int, str, bytes]:
     async def run_test() -> tuple[int, str, bytes]:
-        response = await render(video=FakeUpload(video), text=text, variant=variant)
+        response = await render(
+            video=FakeUpload(video),
+            text=text,
+            variant=variant,
+            text_file=FakeUpload(text_file) if text_file is not None else None,
+        )
         try:
             return response.status_code, response.media_type, Path(response.path).read_bytes()
         finally:
@@ -124,6 +137,16 @@ def test_render_voiceover_returns_mp3(monkeypatch) -> None:
 
     assert (status_code, media_type, body) == (200, "audio/mpeg", FAKE_AUDIO)
     assert calls == [("voiceover", "Test lektora", FAKE_VIDEO)]
+
+
+def test_render_accepts_text_file(monkeypatch) -> None:
+    calls = []
+    patch_pipeline(monkeypatch, calls)
+
+    status_code, media_type, body = run_render("voiceover", text=None, text_file=b"  Tekst z pliku  ")
+
+    assert (status_code, media_type, body) == (200, "audio/mpeg", FAKE_AUDIO)
+    assert calls == [("voiceover", "Tekst z pliku", FAKE_VIDEO)]
 
 
 def test_render_subtitles_returns_srt(monkeypatch) -> None:
@@ -185,6 +208,50 @@ def test_render_requires_text() -> None:
         asyncio.run(render(video=FakeUpload(FAKE_VIDEO), text="   ", variant="voiceover"))
 
     assert exc_info.value.to_response() == {"error": "EMPTY_TEXT", "detail": "text is required"}
+
+
+def test_render_rejects_text_and_text_file_together() -> None:
+    with pytest.raises(TextInputConflictError) as exc_info:
+        asyncio.run(
+            render(
+                video=FakeUpload(FAKE_VIDEO),
+                text="Test",
+                text_file=FakeUpload(b"Test z pliku"),
+                variant="voiceover",
+            )
+        )
+
+    assert exc_info.value.to_response() == {
+        "error": "TEXT_INPUT_CONFLICT",
+        "detail": "provide either text or text_file, not both",
+    }
+
+
+def test_render_rejects_empty_text_file() -> None:
+    with pytest.raises(EmptyTextError) as exc_info:
+        asyncio.run(render(video=FakeUpload(FAKE_VIDEO), text=None, text_file=FakeUpload(b" \n "), variant="voiceover"))
+
+    assert exc_info.value.to_response() == {"error": "EMPTY_TEXT", "detail": "text is required"}
+
+
+def test_render_wraps_text_file_read_failures() -> None:
+    with pytest.raises(TextFileReadError) as exc_info:
+        asyncio.run(render(video=FakeUpload(FAKE_VIDEO), text=None, text_file=FailingUpload(), variant="voiceover"))
+
+    assert exc_info.value.to_response() == {
+        "error": "TEXT_FILE_READ_FAILED",
+        "detail": "failed to read text_file as UTF-8 text",
+    }
+
+
+def test_render_rejects_non_utf8_text_file() -> None:
+    with pytest.raises(TextFileReadError) as exc_info:
+        asyncio.run(render(video=FakeUpload(FAKE_VIDEO), text=None, text_file=FakeUpload(b"\xff"), variant="voiceover"))
+
+    assert exc_info.value.to_response() == {
+        "error": "TEXT_FILE_READ_FAILED",
+        "detail": "failed to read text_file as UTF-8 text",
+    }
 
 
 def test_render_rejects_unsupported_variant() -> None:

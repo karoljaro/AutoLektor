@@ -33,6 +33,22 @@ class UnsupportedVariantError(AutoLektorError):
         super().__init__(f"unsupported variant: {variant}")
 
 
+class TextInputConflictError(AutoLektorError):
+    error_name = "TEXT_INPUT_CONFLICT"
+    status_code = HTTPStatus.BAD_REQUEST
+
+    def __init__(self) -> None:
+        super().__init__("provide either text or text_file, not both")
+
+
+class TextFileReadError(AutoLektorError):
+    error_name = "TEXT_FILE_READ_FAILED"
+    status_code = HTTPStatus.BAD_REQUEST
+
+    def __init__(self) -> None:
+        super().__init__("failed to read text_file as UTF-8 text")
+
+
 class UploadSaveError(AutoLektorError):
     error_name = "UPLOAD_SAVE_FAILED"
 
