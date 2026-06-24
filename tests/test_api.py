@@ -92,6 +92,7 @@ def run_render(
     text_file: bytes | None = None,
     video: bytes = FAKE_VIDEO,
     voice: str | None = None,
+    language: str | None = None,
 ) -> tuple[int, str, bytes]:
     async def run_test() -> tuple[int, str, bytes]:
         response = await render(
@@ -99,6 +100,7 @@ def run_render(
             text=text,
             variant=variant,
             voice=voice,
+            language=language,
             text_file=FakeUpload(text_file) if text_file is not None else None,
         )
         try:
@@ -179,6 +181,19 @@ def test_render_subtitles_returns_srt(monkeypatch) -> None:
     assert calls == [
         ("voiceover", "Test napisow", FAKE_VIDEO),
         ("subtitles", FAKE_AUDIO, "pl"),
+    ]
+
+
+def test_render_accepts_language_override_for_subtitles(monkeypatch) -> None:
+    calls = []
+    patch_pipeline(monkeypatch, calls, subtitles=True)
+
+    status_code, media_type, body = run_render("subtitles", text="Test subtitles", language="  en  ")
+
+    assert (status_code, media_type, body) == (200, "application/x-subrip", FAKE_SRT.encode())
+    assert calls == [
+        ("voiceover", "Test subtitles", FAKE_VIDEO),
+        ("subtitles", FAKE_AUDIO, "en"),
     ]
 
 

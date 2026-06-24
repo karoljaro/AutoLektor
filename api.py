@@ -130,6 +130,10 @@ def resolve_voice(voice: str | None) -> str:
     return (voice or "").strip() or VOICE
 
 
+def resolve_language(language: str | None) -> str:
+    return (language or "").strip() or TRANSCRIPTION_LANGUAGE
+
+
 async def create_voiceover(text: str, workspace: RenderWorkspace, voice: str) -> None:
     try:
         voiceover_service = VoiceoverService(TTSProvider(voice=voice))
@@ -142,13 +146,13 @@ async def create_voiceover(text: str, workspace: RenderWorkspace, voice: str) ->
         raise VoiceoverGenerationError() from exc
 
 
-def create_subtitles(workspace: RenderWorkspace) -> None:
+def create_subtitles(workspace: RenderWorkspace, language: str) -> None:
     try:
         subtitle_service = SubtitleService(WhisperProvider(model_name=WHISPER_MODEL))
         subtitle_service.generate_srt_from_audio(
             audio_path=str(workspace.audio),
             output_srt_path=str(workspace.subtitles),
-            language=TRANSCRIPTION_LANGUAGE,
+            language=language,
         )
     except Exception as exc:
         raise SubtitleGenerationError() from exc
@@ -184,10 +188,12 @@ async def render(
     text: Annotated[str | None, Form()] = None,
     variant: Annotated[str, Form()] = "voiceover",
     voice: Annotated[str | None, Form()] = None,
+    language: Annotated[str | None, Form()] = None,
     text_file: Annotated[UploadFile | None, File()] = None,
 ) -> FileResponse:
     cleaned_text = await resolve_text_input(text, text_file)
     selected_voice = resolve_voice(voice)
+    selected_language = resolve_language(language)
     variant_spec = VARIANTS.get(variant)
     if variant_spec is None:
         raise UnsupportedVariantError(variant)
@@ -198,7 +204,7 @@ async def render(
         await save_upload(video, workspace.source_video)
         await create_voiceover(cleaned_text, workspace, selected_voice)
         if variant_spec.needs_subtitles:
-            create_subtitles(workspace)
+            create_subtitles(workspace, selected_language)
         create_video(workspace, variant_spec)
     except Exception:
         shutil.rmtree(workspace.root, ignore_errors=True)
