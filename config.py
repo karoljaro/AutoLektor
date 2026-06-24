@@ -14,9 +14,6 @@ TRANSCRIPTION_LANGUAGE = "pl"
 # If False, preserves newlines as natural pauses for TTS
 NORMALIZE_WHITESPACE = False
 
-# Video FPS
-VIDEO_FPS = 30
-
 # Video encoding settings
 VIDEO_CODEC = "libx264"
 AUDIO_CODEC = "aac"

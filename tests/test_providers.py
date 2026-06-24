@@ -71,7 +71,37 @@ def test_whisper_provider_loads_model_once_and_transcribes(monkeypatch) -> None:
     transcribe_mock.assert_called_once_with(fake_model, audio="audio.mp3", language="pl")
 
 
-def test_ffmpeg_provider_builds_expected_commands() -> None:
+def test_ffmpeg_provider_detects_video_fps_from_ffprobe(monkeypatch) -> None:
+    def fake_run(command, **kwargs):
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout='{"streams":[{"avg_frame_rate":"30000/1001","r_frame_rate":"30/1"}]}',
+            stderr="",
+        )
+
+    monkeypatch.setattr("providers.ffmpeg_provider.ensure_commands_available", lambda *args: None)
+    monkeypatch.setattr("providers.ffmpeg_provider.subprocess.run", fake_run)
+
+    assert FFmpegProvider.detect_video_fps("in.mp4") == "30000/1001"
+
+
+def test_ffmpeg_provider_detect_video_fps_falls_back_to_r_frame_rate(monkeypatch) -> None:
+    def fake_run(command, **kwargs):
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout='{"streams":[{"avg_frame_rate":"0/0","r_frame_rate":"25/1"}]}',
+            stderr="",
+        )
+
+    monkeypatch.setattr("providers.ffmpeg_provider.ensure_commands_available", lambda *args: None)
+    monkeypatch.setattr("providers.ffmpeg_provider.subprocess.run", fake_run)
+
+    assert FFmpegProvider.detect_video_fps("in.mp4") == "25"
+
+
+def test_ffmpeg_provider_builds_expected_commands(monkeypatch) -> None:
     cases = {
         "full": ["-c:v", "libx264", "-c:a", "aac"],
         "dubbed": ["-c:v", "copy", "-c:a", "aac"],
@@ -79,12 +109,15 @@ def test_ffmpeg_provider_builds_expected_commands() -> None:
     }
 
     for variant, expected_snippet in cases.items():
+        monkeypatch.setattr("providers.ffmpeg_provider.FFmpegProvider.detect_video_fps", lambda path: "24000/1001")
         with patch("providers.ffmpeg_provider.subprocess.run") as run_mock:
             FFmpegProvider.merge_videos("in.mp4", "dub.mp3", "sub.srt", "out.mp4", variant=variant)
 
         command = run_mock.call_args.args[0]
         for token in expected_snippet:
             assert token in command
+        if variant != "dubbed":
+            assert "fps=24000/1001,subtitles=sub.srt" in command
 
 
 def test_ffmpeg_provider_raises_for_unknown_variant() -> None:
@@ -103,11 +136,10 @@ def test_ffmpeg_provider_wraps_subprocess_errors(monkeypatch) -> None:
     monkeypatch.setattr("providers.ffmpeg_provider.subprocess.run", fake_run)
 
     try:
-        FFmpegProvider.merge_videos("in.mp4", "dub.mp3", "sub.srt", "out.mp4", variant="full")
+        FFmpegProvider.merge_videos("in.mp4", "dub.mp3", "sub.srt", "out.mp4", variant="dubbed")
     except RuntimeError as exc:
         assert "FFmpeg command failed: ffmpeg exploded" in str(exc)
     else:
         raise AssertionError("Expected RuntimeError when ffmpeg fails")
-
 
 
