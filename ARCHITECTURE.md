@@ -132,16 +132,20 @@ The caller owns workspace lifetime:
 
 `config.py` contains project defaults only:
 
-- `VOICE`
-- `WHISPER_MODEL`
-- `TRANSCRIPTION_LANGUAGE`
-- `NORMALIZE_WHITESPACE`
-- `VIDEO_CODEC`
-- `AUDIO_CODEC`
+| Setting | Environment variable | Default |
+| --- | --- | --- |
+| `VOICE` | `AUTOLEKTOR_VOICE` | `pl-PL-ZofiaNeural` |
+| `WHISPER_MODEL` | `AUTOLEKTOR_WHISPER_MODEL` | `large-v3` |
+| `TRANSCRIPTION_LANGUAGE` | `AUTOLEKTOR_TRANSCRIPTION_LANGUAGE` | `pl` |
+| `NORMALIZE_WHITESPACE` | `AUTOLEKTOR_NORMALIZE_WHITESPACE` | `false` |
+| `VIDEO_CODEC` | `AUTOLEKTOR_VIDEO_CODEC` | `libx264` |
+| `AUDIO_CODEC` | `AUTOLEKTOR_AUDIO_CODEC` | `aac` |
 
 Input video paths, input text paths and output paths are not configuration. They come from the API request or CLI arguments.
 
 FPS is not configured. For video variants with burned subtitles, `FFmpegProvider` reads the source video FPS through `ffprobe`.
+
+Environment variables are read when the Python process imports `config.py`, so they should be set before starting Uvicorn or running the CLI.
 
 ## Services
 
@@ -316,3 +320,5 @@ Runtime contents:
 - default command: `uvicorn api:app --host 0.0.0.0 --port 8000`
 
 This image is intended to be pulled or referenced from a separate n8n deployment/repository.
+
+Runtime configuration should be passed with environment variables such as `AUTOLEKTOR_VOICE`, `AUTOLEKTOR_TRANSCRIPTION_LANGUAGE` and `AUTOLEKTOR_WHISPER_MODEL`.

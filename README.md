@@ -46,12 +46,14 @@ pip install -r requirements.txt
 
 `config.py` contains project defaults only:
 
-- `VOICE`
-- `WHISPER_MODEL`
-- `TRANSCRIPTION_LANGUAGE`
-- `NORMALIZE_WHITESPACE`
-- `VIDEO_CODEC`
-- `AUDIO_CODEC`
+| Setting | Environment variable | Default |
+| --- | --- | --- |
+| `VOICE` | `AUTOLEKTOR_VOICE` | `pl-PL-ZofiaNeural` |
+| `WHISPER_MODEL` | `AUTOLEKTOR_WHISPER_MODEL` | `large-v3` |
+| `TRANSCRIPTION_LANGUAGE` | `AUTOLEKTOR_TRANSCRIPTION_LANGUAGE` | `pl` |
+| `NORMALIZE_WHITESPACE` | `AUTOLEKTOR_NORMALIZE_WHITESPACE` | `false` |
+| `VIDEO_CODEC` | `AUTOLEKTOR_VIDEO_CODEC` | `libx264` |
+| `AUDIO_CODEC` | `AUTOLEKTOR_AUDIO_CODEC` | `aac` |
 
 Input video paths, text paths and output paths are passed through the API or CLI. They are not configured in `config.py`.
 
@@ -183,6 +185,16 @@ Run the API container:
 
 ```bash
 docker run --rm -p 8000:8000 autolektor-api
+```
+
+Run with configuration overrides:
+
+```bash
+docker run --rm -p 8000:8000 \
+  -e AUTOLEKTOR_VOICE=en-US-AvaNeural \
+  -e AUTOLEKTOR_TRANSCRIPTION_LANGUAGE=en \
+  -e AUTOLEKTOR_WHISPER_MODEL=small \
+  autolektor-api
 ```
 
 Then call:
