@@ -38,5 +38,7 @@ class WhisperProvider:
             Whisper result dict with segments
         """
         model = self.load_model()
-        result = whisper.transcribe(model, audio=audio_path, language=language)
+        device = str(getattr(model, "device", ""))
+        options = {"fp16": False} if device.startswith("cpu") else {}
+        result = whisper.transcribe(model, audio=audio_path, language=language, **options)
         return result

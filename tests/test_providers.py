@@ -54,6 +54,7 @@ def test_tts_provider_rejects_non_string_rate() -> None:
 
 def test_whisper_provider_loads_model_once_and_transcribes(monkeypatch) -> None:
     fake_model = MagicMock(name="fake-model")
+    fake_model.device = "cpu"
     load_model_mock = MagicMock(return_value=fake_model)
     transcribe_mock = MagicMock(return_value={"segments": []})
 
@@ -65,6 +66,29 @@ def test_whisper_provider_loads_model_once_and_transcribes(monkeypatch) -> None:
     assert provider.load_model() is fake_model
     assert provider.load_model() is fake_model
     load_model_mock.assert_called_once_with("base")
+
+    result = provider.transcribe("audio.mp3", language="pl")
+    assert result == {"segments": []}
+    transcribe_mock.assert_called_once_with(
+        fake_model,
+        audio="audio.mp3",
+        language="pl",
+        fp16=False,
+    )
+
+
+def test_whisper_provider_keeps_default_fp16_behavior_for_cuda(monkeypatch) -> None:
+    fake_model = MagicMock(name="fake-model")
+    fake_model.device = "cuda:0"
+    transcribe_mock = MagicMock(return_value={"segments": []})
+
+    monkeypatch.setattr(
+        "providers.whisper_provider.whisper.load_model",
+        MagicMock(return_value=fake_model),
+    )
+    monkeypatch.setattr("providers.whisper_provider.whisper.transcribe", transcribe_mock)
+
+    provider = WhisperProvider(model_name="base")
 
     result = provider.transcribe("audio.mp3", language="pl")
     assert result == {"segments": []}
@@ -141,5 +165,3 @@ def test_ffmpeg_provider_wraps_subprocess_errors(monkeypatch) -> None:
         assert "FFmpeg command failed: ffmpeg exploded" in str(exc)
     else:
         raise AssertionError("Expected RuntimeError when ffmpeg fails")
-
-
