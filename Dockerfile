@@ -98,7 +98,7 @@ for requirement in requires("openai-whisper") or ():
     print(requirement)
 PY
 
-    python -m pip install -r /tmp/whisper-requirements.txt
+    python -m pip install --no-warn-conflicts -r /tmp/whisper-requirements.txt
 else
     # Install one precise CUDA build. PyTorch pulls the matching CUDA 13.0
     # runtime components only; it does not install every CUDA version.
@@ -109,9 +109,8 @@ else
 
     python -m pip install -r /tmp/app-requirements.txt
     python -m pip install "${WHISPER_SPEC}"
+    python -m pip check
 fi
-
-python -m pip check
 
 TORCH_FLAVOR="${TORCH_FLAVOR}" python - <<'PY'
 from importlib.metadata import distributions
